@@ -44,6 +44,8 @@ type Recipe = {
 
 const STORAGE_KEY = 'mottainai-kitchen-pantry-v1'
 const CONSUMED_KEY = 'mottainai-kitchen-consumed-v1'
+const AUTH_TOKEN_KEY = 'mottainai-kitchen-auth-token-v1'
+const AUTH_EMAIL_KEY = 'mottainai-kitchen-auth-email-v1'
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const categoryOptions: Category[] = ['野菜・果物', '肉・魚', '乳製品・卵', '主食・麺', '調味料', 'その他']
 const categoryEmoji: Record<Category, string> = {
@@ -84,14 +86,14 @@ function expiryClass(days: number) {
   if (days <= 3) return 'soon'
   return 'fresh'
 }
-function loadPantry(): PantryItem[] {
+function loadPantry(storageKey = STORAGE_KEY): PantryItem[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey)
     return raw ? JSON.parse(raw) as PantryItem[] : demoItems
   } catch { return demoItems }
 }
-function loadConsumed(): number {
-  try { return Number(localStorage.getItem(CONSUMED_KEY) || '0') } catch { return 0 }
+function loadConsumed(storageKey = CONSUMED_KEY): number {
+  try { return Number(localStorage.getItem(storageKey) || '0') } catch { return 0 }
 }
 function makeId() { return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }
 
@@ -127,13 +129,18 @@ function getFallbackSuggestions(pantry: PantryItem[], budgetYen = 500, maxMinute
 }
 
 function App() {
-  const [pantry, setPantry] = useState<PantryItem[]>(loadPantry)
-  const [consumed, setConsumed] = useState<number>(loadConsumed)
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem(AUTH_TOKEN_KEY) || '')
+  const [authEmail, setAuthEmail] = useState(() => localStorage.getItem(AUTH_EMAIL_KEY) || '')
+  const localPantryKey = authEmail ? `${STORAGE_KEY}:${authEmail}` : STORAGE_KEY
+  const localConsumedKey = authEmail ? `${CONSUMED_KEY}:${authEmail}` : CONSUMED_KEY
+  const [pantry, setPantry] = useState<PantryItem[]>(() => loadPantry(localPantryKey))
+  const [consumed, setConsumed] = useState<number>(() => loadConsumed(localConsumedKey))
   const [activeTab, setActiveTab] = useState<'pantry' | 'recipes'>('pantry')
   const [filter, setFilter] = useState<'all' | 'urgent' | 'expired'>('all')
   const [query, setQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('すべて')
   const [showCategoryMenu, setShowCategoryMenu] = useState(false)
+  const [openTopbarMenu, setOpenTopbarMenu] = useState<'notifications' | 'profile' | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<PantryItem | null>(null)
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null)
@@ -147,23 +154,49 @@ function App() {
   const [notice, setNotice] = useState('')
   const [databaseMode, setDatabaseMode] = useState<'loading' | 'sqlite' | 'local'>('loading')
 
+  function authFetch(input: string, init: RequestInit = {}) {
+    const headers = new Headers(init.headers)
+    if (authToken) headers.set('Authorization', `Bearer ${authToken}`)
+    return fetch(input, { ...init, headers })
+  }
+
+  function handleAuthenticated(token: string, email: string) {
+    localStorage.setItem(AUTH_TOKEN_KEY, token)
+    localStorage.setItem(AUTH_EMAIL_KEY, email)
+    setAuthToken(token)
+    setAuthEmail(email)
+  }
+
+  function handleLogout() {
+    void authFetch(`${API_BASE}/api/auth/logout`, { method: 'POST' }).catch(() => undefined)
+    localStorage.removeItem(AUTH_TOKEN_KEY)
+    localStorage.removeItem(AUTH_EMAIL_KEY)
+    setAuthToken('')
+    setAuthEmail('')
+    setOpenTopbarMenu(null)
+  }
+
   useEffect(() => {
+    if (!authToken) {
+      setDatabaseMode('loading')
+      return
+    }
     let cancelled = false
     async function initializePantry() {
       try {
-        const response = await fetch(`${API_BASE}/api/pantry`)
+        const response = await authFetch(`${API_BASE}/api/pantry`)
         if (!response.ok) throw new Error('SQLite API unavailable')
         let state = await response.json() as { items: PantryItem[]; consumedCount: number; initialized: boolean }
         if (!state.initialized && state.items.length === 0) {
           let initialItems = demoItems
-          const cached = localStorage.getItem(STORAGE_KEY)
+          const cached = localStorage.getItem(localPantryKey)
           if (cached) {
             try {
               const parsed = JSON.parse(cached) as PantryItem[]
               if (Array.isArray(parsed)) initialItems = parsed
             } catch { /* Keep sample data when the legacy cache is unreadable. */ }
           }
-          const seedResponse = await fetch(`${API_BASE}/api/pantry/reset`, {
+          const seedResponse = await authFetch(`${API_BASE}/api/pantry/reset`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(initialItems.map(({ name, quantity, unit, expiryDate, category, emoji, note }) => ({ name, quantity, unit, expiryDate, category, emoji, note }))),
           })
@@ -177,27 +210,28 @@ function App() {
         }
       } catch {
         if (!cancelled) {
-          setPantry(loadPantry())
-          setConsumed(loadConsumed())
+          setPantry(loadPantry(localPantryKey))
+          setConsumed(loadConsumed(localConsumedKey))
           setDatabaseMode('local')
         }
       }
     }
     void initializePantry()
     return () => { cancelled = true }
-  }, [])
+  }, [authToken, localPantryKey, localConsumedKey])
 
   useEffect(() => {
-    if (databaseMode !== 'loading') localStorage.setItem(STORAGE_KEY, JSON.stringify(pantry))
-  }, [pantry, databaseMode])
+    if (databaseMode === 'local') localStorage.setItem(localPantryKey, JSON.stringify(pantry))
+  }, [pantry, databaseMode, localPantryKey])
   useEffect(() => {
-    if (databaseMode !== 'loading') localStorage.setItem(CONSUMED_KEY, String(consumed))
-  }, [consumed, databaseMode])
+    if (databaseMode === 'local') localStorage.setItem(localConsumedKey, String(consumed))
+  }, [consumed, databaseMode, localConsumedKey])
 
   const sortedPantry = useMemo(() => [...pantry].sort((a, b) => daysUntil(a.expiryDate) - daysUntil(b.expiryDate)), [pantry])
   const expiredCount = pantry.filter((item) => daysUntil(item.expiryDate) < 0).length
   const soonCount = pantry.filter((item) => daysUntil(item.expiryDate) >= 0 && daysUntil(item.expiryDate) <= 3).length
   const expiringItems = sortedPantry.filter((item) => daysUntil(item.expiryDate) <= 3).slice(0, 4)
+  const notificationItems = sortedPantry.filter((item) => daysUntil(item.expiryDate) <= 3)
   const visibleItems = sortedPantry.filter((item) => {
     const matchQuery = normalize(item.name).includes(normalize(query))
     const matchCategory = categoryFilter === 'すべて' || item.category === categoryFilter
@@ -209,7 +243,7 @@ function App() {
   async function refreshRecipes() {
     setRecipeLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/recipes/suggest`, {
+      const response = await authFetch(`${API_BASE}/api/recipes/suggest`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pantry: pantry.map(({ name, quantity, unit, expiryDate, category }) => ({ name, quantity, unit, expiry_date: expiryDate, category })),
@@ -230,18 +264,18 @@ function App() {
     } finally { setRecipeLoading(false) }
   }
   useEffect(() => {
-    if (databaseMode === 'loading' || initialRecipeRequested.current) return
+    if (!authToken || databaseMode === 'loading' || initialRecipeRequested.current) return
     // 起動時に1回だけ提案。食材の追加・編集や設定変更のたびに
     // Geminiを自動呼び出しすると無料枠を消費するため、以後はボタン操作に限定。
     initialRecipeRequested.current = true
     void refreshRecipes()
-  }, [databaseMode])
+  }, [authToken, databaseMode])
 
   async function handleSave(item: Omit<PantryItem, 'id' | 'createdAt'>) {
     try {
       let saved: PantryItem
       if (databaseMode === 'sqlite') {
-        const response = await fetch(`${API_BASE}/api/pantry${editing ? `/${editing.id}` : ''}`, {
+        const response = await authFetch(`${API_BASE}/api/pantry${editing ? `/${editing.id}` : ''}`, {
           method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(item),
         })
@@ -266,7 +300,7 @@ function App() {
   async function handleConsume(item: PantryItem) {
     try {
       if (databaseMode === 'sqlite') {
-        const response = await fetch(`${API_BASE}/api/pantry/${item.id}/consume`, { method: 'POST' })
+        const response = await authFetch(`${API_BASE}/api/pantry/${item.id}/consume`, { method: 'POST' })
         if (!response.ok) throw new Error('SQLite consume failed')
         const result = await response.json() as { item: PantryItem | null; consumedCount: number }
         setPantry((current) => result.item ? current.map((row) => row.id === item.id ? result.item as PantryItem : row) : current.filter((row) => row.id !== item.id))
@@ -287,7 +321,7 @@ function App() {
     if (!window.confirm(`${item.name}をリストから削除しますか？`)) return
     try {
       if (databaseMode === 'sqlite') {
-        const response = await fetch(`${API_BASE}/api/pantry/${item.id}`, { method: 'DELETE' })
+        const response = await authFetch(`${API_BASE}/api/pantry/${item.id}`, { method: 'DELETE' })
         if (!response.ok) throw new Error('SQLite delete failed')
       }
       setPantry((current) => current.filter((row) => row.id !== item.id))
@@ -301,7 +335,7 @@ function App() {
     if (!window.confirm('サンプル食材に戻しますか？ 今の登録内容は上書きされます。')) return
     try {
       if (databaseMode === 'sqlite') {
-        const response = await fetch(`${API_BASE}/api/pantry/reset`, {
+        const response = await authFetch(`${API_BASE}/api/pantry/reset`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(demoItems.map(({ name, quantity, unit, expiryDate, category, emoji, note }) => ({ name, quantity, unit, expiryDate, category, emoji, note }))),
         })
@@ -319,6 +353,8 @@ function App() {
     window.setTimeout(() => setNotice(''), 3200)
   }
 
+  if (!authToken) return <LoginScreen apiBase={API_BASE} onAuthenticated={handleAuthenticated} />
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -333,7 +369,7 @@ function App() {
       </aside>
 
       <main className="main-content">
-        <header className="topbar"><div className="breadcrumb"><span>マイキッチン</span><span className="crumb-slash">/</span><strong>{activeTab === 'pantry' ? '冷蔵庫の中身' : 'レシピを探す'}</strong></div><div className="topbar-right"><div className="today-pill"><CalendarDays size={15} /><span>{new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span></div><button className="icon-button" aria-label="期限間近の食材を見る" onClick={() => { setActiveTab('pantry'); setFilter('urgent') }}><Bell size={18} />{soonCount > 0 && <span className="notification-dot" />}</button><div className="avatar">🥑</div></div></header>
+        <header className="topbar"><div className="breadcrumb"><span>マイキッチン</span><span className="crumb-slash">/</span><strong>{activeTab === 'pantry' ? '冷蔵庫の中身' : 'レシピを探す'}</strong></div><div className="topbar-right"><div className="today-pill"><CalendarDays size={15} /><span>{new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span></div><div className="topbar-menu-wrap"><button className="icon-button" aria-label="期限アラートを開く" aria-expanded={openTopbarMenu === 'notifications'} onClick={() => setOpenTopbarMenu(openTopbarMenu === 'notifications' ? null : 'notifications')}><Bell size={18} />{notificationItems.length > 0 && <span className="notification-dot" />}</button>{openTopbarMenu === 'notifications' && <div className="topbar-popover notification-popover"><div className="popover-heading"><strong>期限アラート</strong><span>{notificationItems.length}件</span></div>{notificationItems.length ? <div className="notification-list">{notificationItems.map((item) => { const days = daysUntil(item.expiryDate); return <button className="notification-item" key={item.id} onClick={() => { setActiveTab('pantry'); setFilter(days < 0 ? 'expired' : 'urgent'); setOpenTopbarMenu(null) }}><span className="notification-emoji">{item.emoji}</span><span className="notification-copy"><strong>{item.name}</strong><small>{days < 0 ? '期限切れ' : expiryText(days)} · 残り{item.quantity}{item.unit}</small></span><ArrowRight size={14} /></button> })}</div> : <p className="popover-empty">期限が近い食材はありません。</p>}</div>}</div><div className="topbar-menu-wrap"><button className="avatar avatar-button" aria-label="アカウントメニューを開く" aria-expanded={openTopbarMenu === 'profile'} onClick={() => setOpenTopbarMenu(openTopbarMenu === 'profile' ? null : 'profile')}>🥑</button>{openTopbarMenu === 'profile' && <div className="topbar-popover profile-popover"><div className="profile-title"><span className="profile-avatar">🥑</span><span><strong>マイキッチン</strong><small>{authEmail}</small></span></div><div className="profile-stats"><span><strong>{pantry.length}</strong>登録中</span><span><strong>{consumed}</strong>使い切り</span></div><div className="storage-status"><span className={`status-dot ${databaseMode === 'sqlite' ? 'is-online' : ''}`} />{databaseMode === 'sqlite' ? 'SQLiteに保存中' : databaseMode === 'loading' ? '保存先を確認中…' : 'このブラウザに保存中'}</div><button className="profile-reset" onClick={() => { setOpenTopbarMenu(null); void resetDemo() }}><Settings2 size={14} />サンプルに戻す</button><button className="profile-logout" onClick={handleLogout}>ログアウト</button></div>}</div></div></header>
 
         {activeTab === 'pantry' ? <>
           <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-dot" /> YOUR DAILY KITCHEN</div><h1>大学生の一人暮らし、<span>冷蔵庫を把握できてる？</span></h1><p className="page-subtitle">食費を抑えながら、食材をムダなく使い切ろう。</p></div><button className="primary-button" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={18} />食材を追加</button></section>
@@ -371,6 +407,36 @@ function App() {
       {selectedRecipe && <RecipeModal recipe={selectedRecipe} pantry={pantry} onClose={() => setSelectedRecipe(null)} />}
     </div>
   )
+}
+
+function LoginScreen({ apiBase, onAuthenticated }: { apiBase: string; onAuthenticated: (token: string, email: string) => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const response = await fetch(`${apiBase}/api/auth/${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      const data = await response.json() as { token?: string; email?: string; detail?: string }
+      if (!response.ok || !data.token || !data.email) throw new Error(data.detail || '認証に失敗しました')
+      onAuthenticated(data.token, data.email)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '認証に失敗しました。バックエンドを確認してください。')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><div className="brand-mark"><Leaf size={23} strokeWidth={2.4} /></div><div><div className="brand-name">mottainai</div><div className="brand-sub">KITCHEN</div></div></div><div className="auth-heading"><div className="modal-eyebrow">MY KITCHEN</div><h1>{mode === 'login' ? 'おかえりなさい' : 'キッチンをはじめよう'}</h1><p>{mode === 'login' ? 'ログインして冷蔵庫の中身を確認しましょう。' : 'メールアドレスを登録して食材管理を始めましょう。'}</p></div><form className="auth-form" onSubmit={submit}><label className="form-label">メールアドレス<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required /></label><label className="form-label">パスワード<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8文字以上" minLength={8} required /></label>{error && <div className="form-error">{error}</div>}<button className="primary-button auth-submit" disabled={loading}>{loading ? '確認中…' : mode === 'login' ? 'ログイン' : 'アカウントを作成'}</button></form><button className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError('') }}>{mode === 'login' ? 'はじめての方はこちら（新規登録）' : 'すでにアカウントをお持ちの方はこちら'}</button></section></main>
 }
 
 function IngredientModal({ item, onClose, onSave }: { item: PantryItem | null; onClose: () => void; onSave: (item: Omit<PantryItem, 'id' | 'createdAt'>) => void }) {

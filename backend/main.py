@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import random
 import re
+import secrets
 import sqlite3
 import time
 import uuid
@@ -17,7 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
 
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -56,7 +58,7 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
@@ -87,6 +89,16 @@ class SuggestRequest(BaseModel):
     pantry: list[PantryInput] = Field(default_factory=list, max_length=200)
     preferences: RecipePreferences = Field(default_factory=RecipePreferences)
     refresh_nonce: int = Field(default=0, ge=0, le=1_000_000_000)
+
+
+class AuthCredentials(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class AuthSession(BaseModel):
+    token: str
+    email: str
 
 
 # Fallback recipes keep the core app usable when the API key is not configured,
@@ -232,41 +244,87 @@ def init_database() -> None:
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS pantry_items (
+            CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                quantity REAL NOT NULL CHECK(quantity > 0),
-                unit TEXT NOT NULL,
-                expiry_date TEXT NOT NULL,
-                category TEXT NOT NULL,
-                emoji TEXT NOT NULL,
-                note TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                password_hash TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
             """
         )
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS app_state (
-                id INTEGER PRIMARY KEY CHECK(id = 1),
-                consumed_count INTEGER NOT NULL DEFAULT 0,
-                initialized INTEGER NOT NULL DEFAULT 0
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
             )
             """
         )
         connection.execute(
-            "INSERT OR IGNORE INTO app_state (id, consumed_count, initialized) VALUES (1, 0, 0)"
+            """CREATE TABLE IF NOT EXISTS pantry_items (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                quantity REAL NOT NULL CHECK(quantity > 0), unit TEXT NOT NULL,
+                expiry_date TEXT NOT NULL, category TEXT NOT NULL, emoji TEXT NOT NULL,
+                note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+                user_id TEXT REFERENCES users(id)
+            )"""
         )
+        pantry_columns = {row["name"] for row in connection.execute("PRAGMA table_info(pantry_items)")}
+        if "user_id" not in pantry_columns:
+            connection.execute("ALTER TABLE pantry_items ADD COLUMN user_id TEXT REFERENCES users(id)")
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS app_state (
+                id INTEGER PRIMARY KEY,
+                consumed_count INTEGER NOT NULL DEFAULT 0,
+                initialized INTEGER NOT NULL DEFAULT 0,
+                user_id TEXT REFERENCES users(id)
+            )"""
+        )
+        state_schema = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'app_state'"
+        ).fetchone()["sql"] or ""
+        if "CHECK(id = 1)" in state_schema:
+            connection.execute("ALTER TABLE app_state RENAME TO app_state_legacy")
+            connection.execute(
+                """CREATE TABLE app_state (
+                    id INTEGER PRIMARY KEY,
+                    consumed_count INTEGER NOT NULL DEFAULT 0,
+                    initialized INTEGER NOT NULL DEFAULT 0,
+                    user_id TEXT REFERENCES users(id)
+                )"""
+            )
+            connection.execute(
+                "INSERT INTO app_state (id, consumed_count, initialized, user_id) "
+                "SELECT id, consumed_count, initialized, NULL FROM app_state_legacy"
+            )
+            connection.execute("DROP TABLE app_state_legacy")
+        state_columns = {row["name"] for row in connection.execute("PRAGMA table_info(app_state)")}
+        if "user_id" not in state_columns:
+            connection.execute("ALTER TABLE app_state ADD COLUMN user_id TEXT REFERENCES users(id)")
+        connection.execute("INSERT OR IGNORE INTO app_state (id, consumed_count, initialized, user_id) VALUES (1, 0, 0, NULL)")
+        connection.execute(
+            "DELETE FROM app_state WHERE user_id IS NOT NULL AND id NOT IN "
+            "(SELECT MIN(id) FROM app_state WHERE user_id IS NOT NULL GROUP BY user_id)"
+        )
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_state_user_id ON app_state(user_id) WHERE user_id IS NOT NULL")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS recipe_suggestion_cache (
                 cache_key TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id),
                 result_json TEXT NOT NULL,
                 created_at REAL NOT NULL,
                 expires_at REAL NOT NULL
             )
             """
         )
+        cache_columns = {row["name"] for row in connection.execute("PRAGMA table_info(recipe_suggestion_cache)")}
+        if "user_id" not in cache_columns:
+            connection.execute("ALTER TABLE recipe_suggestion_cache ADD COLUMN user_id TEXT REFERENCES users(id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_pantry_items_user_id ON pantry_items(user_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_recipe_cache_user_id ON recipe_suggestion_cache(user_id)")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS gemini_daily_usage (
@@ -291,12 +349,12 @@ def _db_item_to_api(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def _read_pantry_state(connection: sqlite3.Connection) -> dict[str, Any]:
+def _read_pantry_state(connection: sqlite3.Connection, user_id: str) -> dict[str, Any]:
     rows = connection.execute(
-        "SELECT * FROM pantry_items ORDER BY expiry_date ASC, created_at DESC"
+        "SELECT * FROM pantry_items WHERE user_id = ? ORDER BY expiry_date ASC, created_at DESC", (user_id,)
     ).fetchall()
     state = connection.execute(
-        "SELECT consumed_count, initialized FROM app_state WHERE id = 1"
+        "SELECT consumed_count, initialized FROM app_state WHERE user_id = ?", (user_id,)
     ).fetchone()
     return {
         "items": [_db_item_to_api(row) for row in rows],
@@ -305,23 +363,71 @@ def _read_pantry_state(connection: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
-def _insert_pantry_item(connection: sqlite3.Connection, item: PantryItemWrite) -> dict[str, Any]:
+def _insert_pantry_item(connection: sqlite3.Connection, item: PantryItemWrite, user_id: str) -> dict[str, Any]:
     item_id = str(uuid.uuid4())
     created_at = datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()
     connection.execute(
         """INSERT INTO pantry_items
-           (id, name, quantity, unit, expiry_date, category, emoji, note, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (id, name, quantity, unit, expiry_date, category, emoji, note, created_at, user_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (item_id, item.name.strip(), item.quantity, item.unit, item.expiryDate.isoformat(),
-         item.category, item.emoji, item.note, created_at),
+         item.category, item.emoji, item.note, created_at, user_id),
     )
-    connection.execute("UPDATE app_state SET initialized = 1 WHERE id = 1")
+    connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user_id,))
     row = connection.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,)).fetchone()
     return _db_item_to_api(row)
 
 
 # Create the local database automatically. No database server or paid service is needed.
 init_database()
+
+
+def _password_hash(password: str, salt: bytes | None = None) -> str:
+    actual_salt = salt or secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), actual_salt, 210_000)
+    return f"{actual_salt.hex()}:{digest.hex()}"
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        salt_hex, digest_hex = stored_hash.split(":", 1)
+        expected = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt_hex), 210_000)
+        return hmac.compare_digest(expected.hex(), digest_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _current_user(request: Request) -> sqlite3.Row:
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    token = authorization[7:].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    with db_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT users.id, users.email FROM auth_sessions
+            JOIN users ON users.id = auth_sessions.user_id
+            WHERE auth_sessions.token_hash = ? AND auth_sessions.expires_at > ?
+            """,
+            (_token_hash(token), time.time()),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=401, detail="ログインの有効期限が切れています")
+    return row
+
+
+def _ensure_user_state(connection: sqlite3.Connection, user_id: str) -> None:
+    connection.execute(
+        "INSERT OR IGNORE INTO app_state (id, consumed_count, initialized, user_id) "
+        "VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM app_state), 0, 0, ?)",
+        (user_id,),
+    )
 
 
 def today_japan() -> date:
@@ -663,13 +769,14 @@ def _check_request_limit(client_ip: str) -> bool:
     return True
 
 
-def _cache_key(payload: SuggestRequest) -> str:
+def _cache_key(payload: SuggestRequest, user_id: str) -> str:
     """Same pantry + settings on the same Japan date reuse one AI result.
 
     refresh_nonce is deliberately excluded: the old implementation included it,
     so every click on "もう一度提案" bypassed the cache and consumed quota.
     """
     serializable = {
+        "user_id": user_id,
         "pantry": sorted(
             [item.model_dump(mode="json") for item in payload.pantry],
             key=lambda item: (item["name"], item["expiry_date"], item["quantity"], item["unit"]),
@@ -751,75 +858,141 @@ def _reserve_daily_gemini_request() -> tuple[bool, int]:
 
 
 @app.get("/api/pantry")
-def get_pantry() -> dict[str, Any]:
+def get_pantry(request: Request) -> dict[str, Any]:
+    user = _current_user(request)
     with db_connection() as connection:
-        return _read_pantry_state(connection)
+        _ensure_user_state(connection, user["id"])
+        return _read_pantry_state(connection, user["id"])
+
+
+@app.post("/api/auth/register", response_model=AuthSession)
+def register(payload: AuthCredentials) -> dict[str, str]:
+    email = payload.email.strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status_code=400, detail="有効なメールアドレスを入力してください")
+    with db_connection() as connection:
+        if connection.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
+            raise HTTPException(status_code=409, detail="このメールアドレスは既に登録されています")
+        user_id = str(uuid.uuid4())
+        connection.execute(
+            "INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, email, _password_hash(payload.password), datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()),
+        )
+        _ensure_user_state(connection, user_id)
+        if connection.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"] == 1:
+            connection.execute("UPDATE pantry_items SET user_id = ? WHERE user_id IS NULL", (user_id,))
+            connection.execute("UPDATE app_state SET user_id = ? WHERE id = 1 AND user_id IS NULL", (user_id,))
+    return _create_session(user_id, email)
+
+
+@app.post("/api/auth/login", response_model=AuthSession)
+def login(payload: AuthCredentials) -> dict[str, str]:
+    email = payload.email.strip().lower()
+    with db_connection() as connection:
+        user = connection.execute(
+            "SELECT id, email, password_hash FROM users WHERE email = ?", (email,)
+        ).fetchone()
+    if user is None or not _verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="メールアドレスまたはパスワードが違います")
+    return _create_session(user["id"], user["email"])
+
+
+def _create_session(user_id: str, email: str) -> dict[str, str]:
+    token = secrets.token_urlsafe(32)
+    with db_connection() as connection:
+        connection.execute(
+            "INSERT INTO auth_sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+            (_token_hash(token), user_id, time.time() + 60 * 60 * 24 * 30),
+        )
+    return {"token": token, "email": email}
+
+
+@app.get("/api/auth/me", response_model=AuthSession)
+def get_current_session(request: Request) -> dict[str, str]:
+    user = _current_user(request)
+    return {"token": "", "email": user["email"]}
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request) -> dict[str, bool]:
+    authorization = request.headers.get("Authorization", "")
+    if authorization.startswith("Bearer "):
+        with db_connection() as connection:
+            connection.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (_token_hash(authorization[7:].strip()),))
+    return {"loggedOut": True}
 
 
 @app.post("/api/pantry")
-def create_pantry_item(payload: PantryItemWrite) -> dict[str, Any]:
+def create_pantry_item(payload: PantryItemWrite, request: Request) -> dict[str, Any]:
+    user = _current_user(request)
     with db_connection() as connection:
-        return _insert_pantry_item(connection, payload)
+        _ensure_user_state(connection, user["id"])
+        return _insert_pantry_item(connection, payload, user["id"])
 
 
 @app.put("/api/pantry/reset")
-def reset_pantry(payload: list[PantryItemWrite] = Body(max_length=200)) -> dict[str, Any]:
+def reset_pantry(request: Request, payload: list[PantryItemWrite] = Body(max_length=200)) -> dict[str, Any]:
+    user = _current_user(request)
     with db_connection() as connection:
-        connection.execute("DELETE FROM pantry_items")
-        connection.execute("UPDATE app_state SET consumed_count = 0, initialized = 1 WHERE id = 1")
+        _ensure_user_state(connection, user["id"])
+        connection.execute("DELETE FROM pantry_items WHERE user_id = ?", (user["id"],))
+        connection.execute("UPDATE app_state SET consumed_count = 0, initialized = 1 WHERE user_id = ?", (user["id"],))
         for item in payload:
-            _insert_pantry_item(connection, item)
-        return _read_pantry_state(connection)
+            _insert_pantry_item(connection, item, user["id"])
+        return _read_pantry_state(connection, user["id"])
 
 
 @app.put("/api/pantry/{item_id}")
-def update_pantry_item(item_id: str, payload: PantryItemWrite) -> dict[str, Any]:
+def update_pantry_item(item_id: str, payload: PantryItemWrite, request: Request) -> dict[str, Any]:
+    user = _current_user(request)
     with db_connection() as connection:
         result = connection.execute(
             """UPDATE pantry_items
                SET name = ?, quantity = ?, unit = ?, expiry_date = ?, category = ?, emoji = ?, note = ?
-               WHERE id = ?""",
+               WHERE id = ? AND user_id = ?""",
             (payload.name.strip(), payload.quantity, payload.unit, payload.expiryDate.isoformat(),
-             payload.category, payload.emoji, payload.note, item_id),
+             payload.category, payload.emoji, payload.note, item_id, user["id"]),
         )
         if result.rowcount == 0:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="食材が見つかりません")
-        connection.execute("UPDATE app_state SET initialized = 1 WHERE id = 1")
-        row = connection.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,)).fetchone()
+        connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user["id"],))
+        row = connection.execute("SELECT * FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"])).fetchone()
         return _db_item_to_api(row)
 
 
 @app.delete("/api/pantry/{item_id}")
-def delete_pantry_item(item_id: str) -> dict[str, bool]:
+def delete_pantry_item(item_id: str, request: Request) -> dict[str, bool]:
+    user = _current_user(request)
     with db_connection() as connection:
-        result = connection.execute("DELETE FROM pantry_items WHERE id = ?", (item_id,))
+        result = connection.execute("DELETE FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"]))
         if result.rowcount == 0:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="食材が見つかりません")
-        connection.execute("UPDATE app_state SET initialized = 1 WHERE id = 1")
+        connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user["id"],))
     return {"deleted": True}
 
 
 @app.post("/api/pantry/{item_id}/consume")
-def consume_pantry_item(item_id: str) -> dict[str, Any]:
+def consume_pantry_item(item_id: str, request: Request) -> dict[str, Any]:
+    user = _current_user(request)
     with db_connection() as connection:
-        row = connection.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,)).fetchone()
+        row = connection.execute("SELECT * FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"])).fetchone()
         if row is None:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="食材が見つかりません")
         if float(row["quantity"]) <= 1:
-            connection.execute("DELETE FROM pantry_items WHERE id = ?", (item_id,))
-            connection.execute("UPDATE app_state SET consumed_count = consumed_count + 1, initialized = 1 WHERE id = 1")
+            connection.execute("DELETE FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"]))
+            connection.execute("UPDATE app_state SET consumed_count = consumed_count + 1, initialized = 1 WHERE user_id = ?", (user["id"],))
             updated_item = None
         else:
             connection.execute(
-                "UPDATE pantry_items SET quantity = quantity - 1 WHERE id = ?", (item_id,)
+                "UPDATE pantry_items SET quantity = quantity - 1 WHERE id = ? AND user_id = ?", (item_id, user["id"])
             )
-            connection.execute("UPDATE app_state SET initialized = 1 WHERE id = 1")
-            updated = connection.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,)).fetchone()
+            connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user["id"],))
+            updated = connection.execute("SELECT * FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"])).fetchone()
             updated_item = _db_item_to_api(updated)
-        state = connection.execute("SELECT consumed_count FROM app_state WHERE id = 1").fetchone()
+        state = connection.execute("SELECT consumed_count FROM app_state WHERE user_id = ?", (user["id"],)).fetchone()
         return {"item": updated_item, "consumedCount": int(state["consumed_count"])}
 
 
@@ -836,7 +1009,8 @@ def health() -> dict[str, Any]:
 
 @app.post("/api/recipes/suggest")
 def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]:
-    key = _cache_key(payload)
+    user = _current_user(request)
+    key = _cache_key(payload, user["id"])
 
     # 1) Check SQLite cache first. This path does not call Gemini and does not
     # consume the provider quota or our own daily request allowance.
