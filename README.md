@@ -140,6 +140,10 @@ npm run dev
 
 `backend/main.py` はFastAPIの設定とルーター登録を担当します。認証は `auth.py`、食材CRUDは `pantry.py`、レシピ提案とGemini連携は `recipes.py`、SQLite操作と認証共通処理は `database.py`、Pydanticモデルは `models.py`、環境設定は `config.py` に分かれています。
 
+フロントエンドも、`App.tsx` を画面状態とレイアウトの中心にし、認証画面・食材入力モーダル・レシピ詳細モーダルを `src/components/`、型を `types.ts`、初期データと定数を `data.ts`、日付計算やレシピ評価を `utils.ts` に分けています。
+
+Reactの表示はTSX、全体の見た目はCSSで管理しています。CSSはReactと役割が競合せず、レスポンシブ対応や共通スタイルをまとめやすいため、無理にスタイルまでTSXへ移行せずCSSを継続します。HTMLは`index.html`とTSXのJSXに限定しています。
+
 ## SQLiteからPostgreSQLへ移行する場合
 
 個人開発・ローカル利用ではSQLiteを推奨します。利用者が増えたり、複数ユーザーが同時に書き込む公開サービスへ発展させる段階でPostgreSQLを検討します。現状の実装はSQLite専用で、PostgreSQLへは接続設定だけで切り替わりません。移行時にはDBアクセス層をSQLAlchemy等へ統一し、スキーマ移行とデータ移行を行う想定です。

@@ -1,132 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
 import {
-  AlertTriangle, ArrowRight, Bell, CalendarDays, Check,
-  ChefHat, ChevronDown, CircleCheck, Clock3, CookingPot, Leaf, ListFilter,
-  Plus, Search, Settings2, ShoppingBasket, Sparkles, Trash2, Utensils,
-  X, Pencil, Refrigerator, Flame, Heart, CheckCircle2, Wallet,
+  AlertTriangle, ArrowRight, Bell, CalendarDays, Check, ChevronDown, CircleCheck, Clock3,
+  CookingPot, Flame, Heart, Leaf, ListFilter, Plus, Search, Settings2, ShoppingBasket, Sparkles,
+  Trash2, Pencil, Refrigerator, ChefHat, CheckCircle2, Wallet,
 } from 'lucide-react'
-
-type Category = '野菜・果物' | '肉・魚' | '乳製品・卵' | '主食・麺' | '調味料' | 'その他'
-type PantryItem = {
-  id: string
-  name: string
-  quantity: number
-  unit: string
-  expiryDate: string
-  category: Category
-  emoji: string
-  note: string
-  createdAt: string
-}
-type Recipe = {
-  id: string
-  name: string
-  description: string
-  minutes: number
-  difficulty: 'かんたん' | 'ふつう'
-  emoji: string
-  ingredients: string[]
-  matchedIngredients: string[]
-  missingIngredients: string[]
-  steps: string[]
-  usesExpiring: number
-  matchPercent: number
-  sourceUrl?: string
-  imageUrl?: string
-  source?: string
-  ingredientDetails?: string[]
-  estimatedCostYen?: number
-  servings?: number
-  expiryPriorityScore?: number
-  nearestExpiryDays?: number
-}
-
-const STORAGE_KEY = 'mottainai-kitchen-pantry-v1'
-const CONSUMED_KEY = 'mottainai-kitchen-consumed-v1'
-const AUTH_TOKEN_KEY = 'mottainai-kitchen-auth-token-v1'
-const AUTH_EMAIL_KEY = 'mottainai-kitchen-auth-email-v1'
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-const categoryOptions: Category[] = ['野菜・果物', '肉・魚', '乳製品・卵', '主食・麺', '調味料', 'その他']
-const categoryEmoji: Record<Category, string> = {
-  '野菜・果物': '🥬', '肉・魚': '🥩', '乳製品・卵': '🥚', '主食・麺': '🍚', '調味料': '🧂', 'その他': '🛒',
-}
-
-const demoItems: PantryItem[] = [
-  { id: 'demo-1', name: '牛乳', quantity: 1, unit: '本', expiryDate: dateOffset(1), category: '乳製品・卵', emoji: '🥛', note: '開封済み', createdAt: new Date().toISOString() },
-  { id: 'demo-2', name: '卵', quantity: 6, unit: '個', expiryDate: dateOffset(3), category: '乳製品・卵', emoji: '🥚', note: '', createdAt: new Date().toISOString() },
-  { id: 'demo-3', name: 'ほうれん草', quantity: 1, unit: '袋', expiryDate: dateOffset(0), category: '野菜・果物', emoji: '🥬', note: '', createdAt: new Date().toISOString() },
-  { id: 'demo-4', name: '鶏もも肉', quantity: 250, unit: 'g', expiryDate: dateOffset(2), category: '肉・魚', emoji: '🍗', note: '冷蔵', createdAt: new Date().toISOString() },
-  { id: 'demo-5', name: 'にんじん', quantity: 2, unit: '本', expiryDate: dateOffset(7), category: '野菜・果物', emoji: '🥕', note: '', createdAt: new Date().toISOString() },
-  { id: 'demo-6', name: '食パン', quantity: 4, unit: '枚', expiryDate: dateOffset(-1), category: '主食・麺', emoji: '🍞', note: '', createdAt: new Date().toISOString() },
-  { id: 'demo-7', name: 'ミニトマト', quantity: 1, unit: 'パック', expiryDate: dateOffset(5), category: '野菜・果物', emoji: '🍅', note: '', createdAt: new Date().toISOString() },
-  { id: 'demo-8', name: '豆腐', quantity: 1, unit: '丁', expiryDate: dateOffset(1), category: 'その他', emoji: '⬜', note: '', createdAt: new Date().toISOString() },
-]
-
-function dateOffset(days: number) {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-function daysUntil(dateString: string) {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const target = new Date(`${dateString}T00:00:00`)
-  return Math.round((target.getTime() - today.getTime()) / 86400000)
-}
-function expiryText(days: number) {
-  if (days < 0) return `${Math.abs(days)}日超過`
-  if (days === 0) return '今日まで'
-  if (days === 1) return '明日まで'
-  return `あと${days}日`
-}
-function expiryClass(days: number) {
-  if (days < 0) return 'expired'
-  if (days <= 1) return 'urgent'
-  if (days <= 3) return 'soon'
-  return 'fresh'
-}
-function loadPantry(storageKey = STORAGE_KEY): PantryItem[] {
-  try {
-    const raw = localStorage.getItem(storageKey)
-    return raw ? JSON.parse(raw) as PantryItem[] : demoItems
-  } catch { return demoItems }
-}
-function loadConsumed(storageKey = CONSUMED_KEY): number {
-  try { return Number(localStorage.getItem(storageKey) || '0') } catch { return 0 }
-}
-function makeId() { return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }
-
-const fallbackRecipes: Omit<Recipe, 'matchedIngredients' | 'missingIngredients' | 'usesExpiring' | 'matchPercent'>[] = [
-  { id: 'egg-fried-rice', name: '卵だけでも満足チャーハン', description: 'ごはんと卵があれば作れる、洗い物少なめの定番ごはん。', minutes: 8, difficulty: 'かんたん', emoji: '🍳', ingredients: ['ごはん', '卵', 'しょうゆ'], ingredientDetails: ['ごはん 茶碗1杯', '卵 1個', 'しょうゆ 小さじ1'], estimatedCostYen: 100, servings: 1, steps: ['卵を溶き、フライパンに油をひいて卵に火が通るまで炒める。', 'ごはんを加えてほぐしながら炒める。', 'しょうゆを鍋肌から回し入れて全体を混ぜる。'] },
-  { id: 'tofu-don', name: '豆腐のそぼろ風どんぶり', description: 'ひき肉なしでもボリュームが出る、節約向けの一皿。', minutes: 12, difficulty: 'かんたん', emoji: '🍚', ingredients: ['ごはん', '豆腐', 'しょうゆ', '砂糖'], ingredientDetails: ['ごはん 茶碗1杯', '豆腐 1/2丁', 'しょうゆ 大さじ1', '砂糖 小さじ1'], estimatedCostYen: 150, servings: 1, steps: ['豆腐はキッチンペーパーで軽く水気を取る。', 'フライパンで豆腐を崩しながら炒め、水分を飛ばす。', 'しょうゆと砂糖を加えてなじませ、ごはんにのせる。'] },
-  { id: 'cabbage-egg', name: 'キャベツと卵のふんわり炒め', description: '余り野菜を使い切りやすい、フライパンひとつの簡単おかず。', minutes: 10, difficulty: 'かんたん', emoji: '🥬', ingredients: ['キャベツ', '卵', '塩こしょう'], ingredientDetails: ['キャベツ 2枚', '卵 1個', '塩こしょう 少々'], estimatedCostYen: 120, servings: 1, steps: ['キャベツを食べやすい大きさにちぎる。', 'フライパンでキャベツを炒め、しんなりしたら溶き卵を加える。', '卵にしっかり火が通るまで混ぜ、塩こしょうで味を調える。'] },
-  { id: 'butter-soy-pasta', name: 'きのこのバターしょうゆパスタ', description: 'パスタときのこで作る、材料少なめの一人ごはん。', minutes: 15, difficulty: 'かんたん', emoji: '🍝', ingredients: ['パスタ', 'しめじ', 'しょうゆ', 'バター'], ingredientDetails: ['パスタ 80g', 'しめじ 1/3パック', 'しょうゆ 小さじ2', 'バター 5g'], estimatedCostYen: 220, servings: 1, steps: ['パスタを袋の表示どおりにゆでる。', 'フライパンでしめじを炒め、ゆでたパスタを加える。', 'しょうゆとバターを加えて全体を混ぜる。'] },
-  { id: 'tuna-mayo-rice', name: 'ツナマヨたまご丼', description: '火を使う工程を少なくしたい日に。ツナ缶を活用。', minutes: 7, difficulty: 'かんたん', emoji: '🥫', ingredients: ['ごはん', 'ツナ缶', '卵', 'マヨネーズ'], ingredientDetails: ['ごはん 茶碗1杯', 'ツナ缶 1/2缶', '卵 1個', 'マヨネーズ 小さじ1'], estimatedCostYen: 230, servings: 1, steps: ['ツナ缶の油を軽く切り、マヨネーズと混ぜる。', '卵は黄身と白身にしっかり火が通るまで加熱する。', 'ごはんにツナマヨと卵をのせる。'] },
-]
-function normalize(s: string) { return s.replace(/[ 　]/g, '').toLowerCase() }
-function expiryPriorityPoints(days: number) {
-  if (days < 0 || days > 7) return 0
-  return [100, 80, 60, 40, 20, 15, 10, 5][days]
-}
-function ingredientMatches(ingredient: string, item: PantryItem) {
-  return normalize(item.name).includes(normalize(ingredient)) || normalize(ingredient).includes(normalize(item.name))
-}
-function scoreRecipe(recipe: typeof fallbackRecipes[number], pantry: PantryItem[]): Recipe {
-  const usablePantry = pantry.filter((item) => daysUntil(item.expiryDate) >= 0)
-  const matched = recipe.ingredients.filter((ingredient) => usablePantry.some((item) => ingredientMatches(ingredient, item)))
-  const matchedItems = usablePantry.filter((item) => matched.some((ingredient) => ingredientMatches(ingredient, item)))
-  const expiringMatches = matchedItems.filter((item) => daysUntil(item.expiryDate) <= 3)
-  const expiryDays = matchedItems.map((item) => daysUntil(item.expiryDate))
-  const nearestExpiryDays = expiryDays.length ? Math.min(...expiryDays) : 999
-  const priorityScore = expiryDays.reduce((sum, days) => sum + expiryPriorityPoints(days), 0)
-  const missing = recipe.ingredients.filter((ingredient) => !matched.includes(ingredient))
-  const pct = Math.round((matched.length / recipe.ingredients.length) * 100)
-  return { ...recipe, matchedIngredients: matched, missingIngredients: missing, usesExpiring: expiringMatches.length, nearestExpiryDays, expiryPriorityScore: priorityScore, matchPercent: pct }
-}
-function getFallbackSuggestions(pantry: PantryItem[], budgetYen = 500, maxMinutes = 20): Recipe[] {
-  return fallbackRecipes.filter((recipe) => (recipe.estimatedCostYen ?? 9999) <= budgetYen && recipe.minutes <= maxMinutes).map((recipe) => scoreRecipe(recipe, pantry)).sort((a, b) => (a.nearestExpiryDays ?? 999) - (b.nearestExpiryDays ?? 999) || (b.expiryPriorityScore ?? 0) - (a.expiryPriorityScore ?? 0) || b.usesExpiring - a.usesExpiring || b.matchPercent - a.matchPercent || (a.estimatedCostYen ?? 9999) - (b.estimatedCostYen ?? 9999)).slice(0, 3)
-}
+import type { PantryItem, Recipe } from './types'
+import { API_BASE, AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, CONSUMED_KEY, categoryEmoji, categoryOptions, demoItems, STORAGE_KEY } from './data'
+import { daysUntil, expiryClass, expiryText, getFallbackSuggestions, normalize, loadConsumed, loadPantry, makeId } from './utils'
+import { LoginScreen } from './components/LoginScreen'
+import { IngredientModal } from './components/IngredientModal'
+import { RecipeModal } from './components/RecipeModal'
 
 function App() {
   const [authToken, setAuthToken] = useState(() => localStorage.getItem(AUTH_TOKEN_KEY) || '')
@@ -407,59 +290,6 @@ function App() {
       {selectedRecipe && <RecipeModal recipe={selectedRecipe} pantry={pantry} onClose={() => setSelectedRecipe(null)} />}
     </div>
   )
-}
-
-function LoginScreen({ apiBase, onAuthenticated }: { apiBase: string; onAuthenticated: (token: string, email: string) => void }) {
-  const [mode, setMode] = useState<'login' | 'register'>('login')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  async function submit(event: FormEvent) {
-    event.preventDefault()
-    setError('')
-    setLoading(true)
-    try {
-      const response = await fetch(`${apiBase}/api/auth/${mode}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
-      const data = await response.json() as { token?: string; email?: string; detail?: string }
-      if (!response.ok || !data.token || !data.email) throw new Error(data.detail || '認証に失敗しました')
-      onAuthenticated(data.token, data.email)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '認証に失敗しました。バックエンドを確認してください。')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><div className="brand-mark"><Leaf size={23} strokeWidth={2.4} /></div><div><div className="brand-name">mottainai</div><div className="brand-sub">KITCHEN</div></div></div><div className="auth-heading"><div className="modal-eyebrow">MY KITCHEN</div><h1>{mode === 'login' ? 'おかえりなさい' : 'キッチンをはじめよう'}</h1><p>{mode === 'login' ? 'ログインして冷蔵庫の中身を確認しましょう。' : 'メールアドレスを登録して食材管理を始めましょう。'}</p></div><form className="auth-form" onSubmit={submit}><label className="form-label">メールアドレス<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required /></label><label className="form-label">パスワード<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8文字以上" minLength={8} required /></label>{error && <div className="form-error">{error}</div>}<button className="primary-button auth-submit" disabled={loading}>{loading ? '確認中…' : mode === 'login' ? 'ログイン' : 'アカウントを作成'}</button></form><button className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError('') }}>{mode === 'login' ? 'はじめての方はこちら（新規登録）' : 'すでにアカウントをお持ちの方はこちら'}</button></section></main>
-}
-
-function IngredientModal({ item, onClose, onSave }: { item: PantryItem | null; onClose: () => void; onSave: (item: Omit<PantryItem, 'id' | 'createdAt'>) => void }) {
-  const [name, setName] = useState(item?.name ?? '')
-  const [quantity, setQuantity] = useState(String(item?.quantity ?? 1))
-  const [unit, setUnit] = useState(item?.unit ?? '個')
-  const [expiryDate, setExpiryDate] = useState(item?.expiryDate ?? dateOffset(3))
-  const [category, setCategory] = useState<Category>(item?.category ?? '野菜・果物')
-  const [note, setNote] = useState(item?.note ?? '')
-  const [validation, setValidation] = useState('')
-  const emoji = item?.emoji ?? categoryEmoji[category]
-  function submit(e: FormEvent) {
-    e.preventDefault()
-    if (!name.trim()) { setValidation('食材名を入力してください。'); return }
-    if (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0) { setValidation('残量は0より大きい数字にしてください。'); return }
-    if (!expiryDate) { setValidation('期限を入力してください。'); return }
-    onSave({ name: name.trim(), quantity: Number(quantity), unit, expiryDate, category, emoji, note: note.trim() })
-  }
-  return <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}><section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="ingredient-modal-title"><div className="modal-header"><div><div className="modal-eyebrow">YOUR PANTRY</div><h2 id="ingredient-modal-title">{item ? '食材を編集' : '食材を追加'}</h2><p>食材の情報を入力してください。</p></div><button className="modal-close" onClick={onClose} aria-label="閉じる"><X size={19} /></button></div><form onSubmit={submit} className="ingredient-form"><label className="form-label">食材名 <span>必須</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="例：キャベツ" /></label><div className="form-two-col"><label className="form-label">残量<input type="number" min="0.1" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} /></label><label className="form-label">単位<input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="個、g、本など" /></label></div><label className="form-label">賞味・消費期限 <span>必須</span><input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} /></label><label className="form-label">カテゴリ<select value={category} onChange={(e) => setCategory(e.target.value as Category)}>{categoryOptions.map((option) => <option key={option} value={option}>{categoryEmoji[option]} {option}</option>)}</select></label><label className="form-label">メモ <small>任意</small><textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="例：開封済み、冷凍保存中..." /></label>{validation && <div className="form-error">{validation}</div>}<div className="modal-actions"><button type="button" className="cancel-button" onClick={onClose}>キャンセル</button><button type="submit" className="primary-button"><Check size={16} />{item ? '変更を保存' : '食材を追加'}</button></div></form></section></div>
-}
-
-function RecipeModal({ recipe, pantry, onClose }: { recipe: Recipe; pantry: PantryItem[]; onClose: () => void }) {
-  return <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}><section className="modal-panel recipe-modal-panel" role="dialog" aria-modal="true" aria-labelledby="recipe-modal-title"><div className="recipe-modal-hero"><div className="recipe-modal-emoji">{recipe.emoji}</div><button className="modal-close recipe-modal-close" onClick={onClose} aria-label="閉じる"><X size={19} /></button><div className="modal-eyebrow">RECIPE IDEA</div><h2 id="recipe-modal-title">{recipe.name}</h2><p>{recipe.description}</p><div className="recipe-modal-meta"><span><Clock3 size={14} />約{recipe.minutes}分</span><span><ChefHat size={14} />{recipe.difficulty}</span><span><Wallet size={14} />約{recipe.estimatedCostYen ?? '—'}円/人</span><span>1人分</span></div></div><div className="recipe-modal-body"><h3><ShoppingBasket size={17} />材料の目安</h3><div className="recipe-ingredient-list">{recipe.ingredients.map((ingredient) => { const have = pantry.some((item) => daysUntil(item.expiryDate) >= 0 && (normalize(item.name).includes(normalize(ingredient)) || normalize(ingredient).includes(normalize(item.name)))); return <div className="recipe-ingredient-row" key={ingredient}><span className={`ingredient-status ${have ? 'have-it' : ''}`}>{have ? <Check size={13} /> : <Plus size={13} />}</span><span>{recipe.ingredientDetails?.[recipe.ingredients.indexOf(ingredient)] || ingredient}</span><span className={`ingredient-status-label ${have ? 'have-text' : ''}`}>{have ? '冷蔵庫にある' : '買い足し'}</span></div> })}</div><h3 className="steps-heading"><Utensils size={17} />作り方</h3>{recipe.steps.length ? <ol className="recipe-steps">{recipe.steps.map((step, index) => <li key={step}><span>{index + 1}</span><p>{step}</p></li>)}</ol> : <p className="recipe-external-note">作り方の情報が取得できませんでした。別のレシピを提案し直してください。</p>}<div className="recipe-safety-note"><AlertTriangle size={15} /><p>期限切れの食材は状態を確認し、異臭・変色などがある場合は使用しないでください。肉や卵は十分に加熱してください。</p></div>{recipe.sourceUrl ? <a className="primary-button recipe-modal-done recipe-source-link" href={recipe.sourceUrl} target="_blank" rel="noreferrer"><ArrowRight size={16} />{recipe.source || '元のレシピサイト'}で作り方を見る</a> : <button className="primary-button recipe-modal-done" onClick={onClose}><Check size={16} />料理を始める</button>}</div></section></div>
 }
 
 export default App
