@@ -25,6 +25,7 @@ def db_connection():
         db_path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(DATABASE_PATH), timeout=15)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
     try:
         yield connection
         connection.commit()
@@ -123,6 +124,28 @@ def init_database() -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_recipe_cache_user_id ON recipe_suggestion_cache(user_id)")
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS shopping_items (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                checked INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_shopping_items_user_id ON shopping_items(user_id)")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pantry_staples (
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                PRIMARY KEY (user_id, name)
+            )
+            """
+        )
+        connection.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (time.time(),))
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS gemini_daily_usage (
                 usage_date TEXT PRIMARY KEY,
                 request_count INTEGER NOT NULL DEFAULT 0
@@ -172,6 +195,13 @@ def _insert_pantry_item(connection: sqlite3.Connection, item: PantryItemWrite, u
     connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user_id,))
     row = connection.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,)).fetchone()
     return _db_item_to_api(row)
+
+
+def _read_staples(connection: sqlite3.Connection, user_id: str) -> list[str]:
+    rows = connection.execute(
+        "SELECT name FROM pantry_staples WHERE user_id = ? ORDER BY name", (user_id,)
+    ).fetchall()
+    return [row["name"] for row in rows]
 
 
 def _password_hash(password: str, salt: bytes | None = None) -> str:

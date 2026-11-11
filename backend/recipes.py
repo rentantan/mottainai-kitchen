@@ -13,10 +13,10 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
 
-from config import (CACHE_SECONDS, GEMINI_API_KEY, GEMINI_MODEL, GEMINI_TIMEOUT_SECONDS,
+from config import (CACHE_SECONDS, GEMINI_API_KEY, GEMINI_MODEL, GEMINI_TIMEOUT_SECONDS, GEMINI_TOTAL_DEADLINE_SECONDS,
                     MAX_REQUESTS_PER_DAY, MAX_REQUESTS_PER_HOUR_PER_IP,
                     MIN_REQUEST_INTERVAL_SECONDS, PROMPT_VERSION)
-from database import _current_user, db_connection
+from database import _current_user, _read_staples, db_connection
 from models import PantryInput, RecipePreferences, SuggestRequest
 
 router = APIRouter(prefix="/api/recipes")
@@ -136,7 +136,6 @@ RECIPE_RESPONSE_SCHEMA: dict[str, Any] = {
 }
 
 
-_suggestion_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _request_history: dict[str, list[float]] = {}
 _last_request_at: dict[str, float] = {}
 
@@ -149,12 +148,22 @@ def normalize(value: str) -> str:
     return re.sub(r"[\s　]", "", value).lower()
 
 
-def matches_ingredient(required: str, pantry_item: PantryInput) -> bool:
+def matches_name(required: str, name: str) -> bool:
     required_n = normalize(required)
-    pantry_n = normalize(pantry_item.name)
-    if not required_n or not pantry_n:
+    name_n = normalize(name)
+    if not required_n or not name_n:
         return False
-    return required_n in pantry_n or pantry_n in required_n
+    return required_n in name_n or name_n in required_n
+
+
+def matches_ingredient(required: str, pantry_item: PantryInput) -> bool:
+    return matches_name(required, pantry_item.name)
+
+
+def _is_available(ingredient: str, usable_pantry: list[PantryInput], staples: list[str]) -> bool:
+    """In stock if a non-expired pantry item or a registered staple seasoning matches."""
+    return (any(matches_ingredient(ingredient, item) for item in usable_pantry)
+            or any(matches_name(ingredient, staple) for staple in staples))
 
 
 def expiry_priority_points(days_left: int) -> int:
@@ -201,7 +210,7 @@ def _expiry_context(item: PantryInput, today: date) -> dict[str, Any]:
     }
 
 
-def _build_prompt(request: SuggestRequest) -> str:
+def _build_prompt(request: SuggestRequest, staples: list[str]) -> str:
     today = today_japan()
     pantry_context = [_expiry_context(item, today) for item in request.pantry]
     usable = [row for row in pantry_context if row["days_until_expiry"] >= 0]
@@ -227,17 +236,20 @@ def _build_prompt(request: SuggestRequest) -> str:
 【期限切れのため使ってはいけない食材】
 {json.dumps(expired, ensure_ascii=False)}
 
+【常備している調味料（買い足し不要・期限管理の対象外）】
+{json.dumps(staples, ensure_ascii=False)}
+
 【レシピ作成ルール】
 1. 3つの異なるレシピを提案する。登録済み食材を優先し、期限が最も近いものを使えるレシピを上位候補にする。
 2. 期限の優先順位は「今日まで > あと1日 > あと2日 > あと3日 > あと4〜7日 > 8日以上」。期限が今日〜3日以内の食材がある場合、可能な限りその食材を使う。
 3. 期限切れの食材は絶対に材料に含めない。期限切れ食材を新しく買い足すような提案も避ける。
-4. 買い足し材料はできるだけ少なくし、登録食材以外は原則2種類以内。調味料は一般的なものを優先する。
+4. 買い足し材料はできるだけ少なくし、登録食材・常備調味料以外は原則2種類以内。調味料は常備調味料を優先する。
 5. 食材名は照合しやすい短い名前（例「卵」「キャベツ」）にし、ingredientDetailsには1人分の分量（例「卵 1個」）を書く。
 6. 手順は初心者向けに具体的な日本語で3〜6ステップにする。
 7. 肉・魚・卵を使う場合は中心まで十分に加熱する手順にする。生食を前提にしない。
-7. estimatedCostYenは1人分の材料費の概算整数。正確な販売価格ではないので現実的な目安にする。
-8. 予算や時間を守れないレシピは作らない。3案は主食・丼・麺・おかず等でなるべく変化をつける。
-9. 説明文や手順にMarkdown、コードブロック、JSON以外の前置きを含めない。
+8. estimatedCostYenは1人分の材料費の概算整数。正確な販売価格ではないので現実的な目安にする。
+9. 予算や時間を守れないレシピは作らない。3案は主食・丼・麺・おかず等でなるべく変化をつける。
+10. 説明文や手順にMarkdown、コードブロック、JSON以外の前置きを含めない。
 
 JSONスキーマに従って、recipes配列だけを返してください。"""
 
@@ -269,9 +281,14 @@ def _gemini_generate(prompt: str) -> dict[str, Any]:
     # Google recommends exponential backoff for transient 503 UNAVAILABLE errors.
     # Retry three times (up to four total attempts) before falling back to local recipes.
     max_503_retries = 3
+    started = time.monotonic()
+    busy_message = "Gemini APIが一時的に混雑しています。自動で再試行しましたが接続できませんでした。しばらく待ってからもう一度提案してください。"
     for attempt in range(max_503_retries + 1):
+        remaining = GEMINI_TOTAL_DEADLINE_SECONDS - (time.monotonic() - started)
+        if remaining < 3:
+            raise RuntimeError(busy_message)
         try:
-            with urlopen(request, timeout=GEMINI_TIMEOUT_SECONDS) as response:
+            with urlopen(request, timeout=min(GEMINI_TIMEOUT_SECONDS, remaining)) as response:
                 data = json.loads(response.read().decode("utf-8"))
             break
         except HTTPError as exc:
@@ -284,12 +301,13 @@ def _gemini_generate(prompt: str) -> dict[str, Any]:
                     pass
                 # Respect Retry-After when supplied; otherwise use 1s, 2s, 4s + jitter.
                 delay = min(max(retry_after, 0.0), 10.0) if retry_after is not None else min(2 ** attempt, 4) + random.uniform(0.0, 0.35)
+                # Stop retrying if the wait would exceed the total deadline.
+                if time.monotonic() - started + delay + 3 > GEMINI_TOTAL_DEADLINE_SECONDS:
+                    raise RuntimeError(busy_message) from exc
                 time.sleep(delay)
                 continue
             if exc.code == 503:
-                raise RuntimeError(
-                    "Gemini APIが一時的に混雑しています。自動で3回再試行しましたが接続できませんでした。少し時間をおいてしばらく待ってからもう一度提案してください。"
-                ) from exc
+                raise RuntimeError(busy_message) from exc
             if exc.code == 429:
                 provider_message = ""
                 quota_labels: list[str] = []
@@ -309,7 +327,7 @@ def _gemini_generate(prompt: str) -> dict[str, Any]:
                     pass
                 diagnostic = (provider_message + " " + " ".join(quota_labels)).lower()
                 if any(term in diagnostic for term in ("perday", "per_day", "requests per day", "daily")):
-                    message = "Gemini APIの日次リクエスト上限に達しています。日本時間17時以降（太平洋時間0時のリセット後）に再試行してください。"
+                    message = "Gemini APIの日次リクエスト上限に達しています。太平洋時間0時（日本時間16〜17時ごろ）のリセット後に再試行してください。"
                 elif any(term in diagnostic for term in ("perminute", "per_minute", "requests per minute", "rpm")):
                     message = "Gemini APIの1分あたりのリクエスト上限に達しています。1分ほど待ってから再試行してください。"
                 else:
@@ -346,7 +364,7 @@ def _safe_string(value: Any, fallback: str, limit: int = 160) -> str:
     return cleaned[:limit] if cleaned else fallback
 
 
-def _format_gemini_recipes(raw: dict[str, Any], pantry: list[PantryInput]) -> list[dict[str, Any]]:
+def _format_gemini_recipes(raw: dict[str, Any], pantry: list[PantryInput], staples: list[str]) -> list[dict[str, Any]]:
     today = today_japan()
     formatted: list[dict[str, Any]] = []
     raw_recipes = raw.get("recipes", [])
@@ -380,12 +398,12 @@ def _format_gemini_recipes(raw: dict[str, Any], pantry: list[PantryInput]) -> li
         # non-expired stock of the same ingredient is available.
         uses_expired_stock = any(
             any(matches_ingredient(ingredient, expired_item) for expired_item in expired_pantry)
-            and not any(matches_ingredient(ingredient, good_item) for good_item in usable_pantry)
+            and not _is_available(ingredient, usable_pantry, staples)
             for ingredient in ingredients
         )
         if uses_expired_stock:
             continue
-        matched = [ingredient for ingredient in ingredients if any(matches_ingredient(ingredient, item) for item in usable_pantry)]
+        matched = [ingredient for ingredient in ingredients if _is_available(ingredient, usable_pantry, staples)]
         missing = [ingredient for ingredient in ingredients if ingredient not in matched]
         matched_items = [
             item for item in usable_pantry
@@ -432,7 +450,7 @@ def _format_gemini_recipes(raw: dict[str, Any], pantry: list[PantryInput]) -> li
     return formatted
 
 
-def _format_fallback(pantry: list[PantryInput], preferences: RecipePreferences) -> list[dict[str, Any]]:
+def _format_fallback(pantry: list[PantryInput], preferences: RecipePreferences, staples: list[str]) -> list[dict[str, Any]]:
     today = today_japan()
     recipes: list[dict[str, Any]] = []
     for recipe in FALLBACK_RECIPES:
@@ -441,7 +459,7 @@ def _format_fallback(pantry: list[PantryInput], preferences: RecipePreferences) 
         if recipe["estimatedCostYen"] > preferences.budget_yen:
             continue
         usable_pantry = [item for item in pantry if item.expiry_date >= today]
-        matched = [ingredient for ingredient in recipe["ingredients"] if any(matches_ingredient(ingredient, item) for item in usable_pantry)]
+        matched = [ingredient for ingredient in recipe["ingredients"] if _is_available(ingredient, usable_pantry, staples)]
         missing = [ingredient for ingredient in recipe["ingredients"] if ingredient not in matched]
         matched_items = [item for item in usable_pantry if any(matches_ingredient(ingredient, item) for ingredient in matched)]
         expiry_days = [(item.expiry_date - today).days for item in matched_items]
@@ -480,7 +498,7 @@ def _check_request_limit(client_ip: str) -> bool:
     return True
 
 
-def _cache_key(payload: SuggestRequest, user_id: str) -> str:
+def _cache_key(payload: SuggestRequest, user_id: str, staples: list[str]) -> str:
     """Same pantry + settings on the same Japan date reuse one AI result.
 
     refresh_nonce is deliberately excluded: the old implementation included it,
@@ -492,6 +510,7 @@ def _cache_key(payload: SuggestRequest, user_id: str) -> str:
             [item.model_dump(mode="json") for item in payload.pantry],
             key=lambda item: (item["name"], item["expiry_date"], item["quantity"], item["unit"]),
         ),
+        "staples": sorted(staples),
         "preferences": payload.preferences.model_dump(mode="json"),
         "japan_date": today_japan().isoformat(),
         "model": GEMINI_MODEL,
@@ -527,19 +546,19 @@ def _read_persistent_recipe_cache(cache_key: str) -> dict[str, Any] | None:
     }
 
 
-def _write_persistent_recipe_cache(cache_key: str, result: dict[str, Any]) -> None:
+def _write_persistent_recipe_cache(cache_key: str, user_id: str, result: dict[str, Any]) -> None:
     now = time.time()
     with db_connection() as connection:
         connection.execute(
             """
-            INSERT INTO recipe_suggestion_cache (cache_key, result_json, created_at, expires_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO recipe_suggestion_cache (cache_key, user_id, result_json, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(cache_key) DO UPDATE SET
                 result_json = excluded.result_json,
                 created_at = excluded.created_at,
                 expires_at = excluded.expires_at
             """,
-            (cache_key, json.dumps(result, ensure_ascii=False), now, now + CACHE_SECONDS),
+            (cache_key, user_id, json.dumps(result, ensure_ascii=False), now, now + CACHE_SECONDS),
         )
         # Keep only the most recent 100 cache records.
         connection.execute(
@@ -570,7 +589,9 @@ def _reserve_daily_gemini_request() -> tuple[bool, int]:
 @router.post("/suggest")
 def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]:
     user = _current_user(request)
-    key = _cache_key(payload, user["id"])
+    with db_connection() as connection:
+        staples = _read_staples(connection, user["id"])
+    key = _cache_key(payload, user["id"], staples)
 
     # 1) Check SQLite cache first. This path does not call Gemini and does not
     # consume the provider quota or our own daily request allowance.
@@ -578,7 +599,7 @@ def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]
     if cached is not None:
         return cached
 
-    fallback = _format_fallback(payload.pantry, payload.preferences)
+    fallback = _format_fallback(payload.pantry, payload.preferences, staples)
     if not GEMINI_API_KEY:
         return {
             "recipes": fallback,
@@ -593,7 +614,7 @@ def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]
             "recipes": fallback,
             "source": "local",
             "cached": False,
-            "message": "アプリ側の連続リクエスト防止制限に達しました。20秒以上待ってから再試行してください。サンプルレシピを表示しています。",
+            "message": f"アプリ側の連続リクエスト防止制限に達しました（{int(MIN_REQUEST_INTERVAL_SECONDS)}秒間隔・1時間{MAX_REQUESTS_PER_HOUR_PER_IP}回まで）。少し待ってから再試行してください。サンプルレシピを表示しています。",
         }
 
     allowed, daily_used = _reserve_daily_gemini_request()
@@ -606,8 +627,8 @@ def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]
         }
 
     try:
-        raw = _gemini_generate(_build_prompt(payload))
-        recipes = _format_gemini_recipes(raw, payload.pantry)
+        raw = _gemini_generate(_build_prompt(payload, staples))
+        recipes = _format_gemini_recipes(raw, payload.pantry, staples)
         # Enforce user's selected bounds even if the model ignores the prompt.
         recipes = [
             recipe for recipe in recipes
@@ -622,7 +643,7 @@ def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]
             "cached": False,
             "message": f"{GEMINI_MODEL} が一人分・節約・時短の条件で提案しました。成功した提案はSQLiteに24時間保存し、同じ条件ではAPIを再利用しません。材料費は概算です。",
         }
-        _write_persistent_recipe_cache(key, result)
+        _write_persistent_recipe_cache(key, user["id"], result)
         return result
     except RuntimeError as exc:
         return {

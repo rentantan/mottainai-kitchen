@@ -27,10 +27,12 @@ def register(payload: AuthCredentials) -> dict[str, str]:
             "INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
             (user_id, email, _password_hash(payload.password), datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()),
         )
-        _ensure_user_state(connection, user_id)
         if connection.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"] == 1:
+            # Hand pre-login (legacy) data to the first account. This must run before
+            # _ensure_user_state, otherwise the unique index on app_state.user_id fails.
             connection.execute("UPDATE pantry_items SET user_id = ? WHERE user_id IS NULL", (user_id,))
             connection.execute("UPDATE app_state SET user_id = ? WHERE id = 1 AND user_id IS NULL", (user_id,))
+        _ensure_user_state(connection, user_id)
     return _create_session(user_id, email)
 
 

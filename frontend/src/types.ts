@@ -33,3 +33,10 @@ export type Recipe = {
   nearestExpiryDays?: number
 }
 
+export type ShoppingItem = {
+  id: string
+  name: string
+  checked: boolean
+  createdAt: string
+}
+export type PantryState = { items: PantryItem[]; consumedCount: number; initialized: boolean }
