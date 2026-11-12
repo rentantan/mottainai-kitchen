@@ -3,7 +3,7 @@ import type { PantryItem, Recipe } from '../types'
 import type { Equipment } from '../data'
 import type { DataStatus } from '../Kitchen'
 import { FRONTEND_TIMEOUT_MS } from '../api'
-import { getFallbackSuggestions } from '../utils'
+import { getFallbackSuggestions, scoreRecipe } from '../utils'
 
 export type Budget = 300 | 500 | 700
 export type Minutes = 10 | 20 | 30
@@ -61,6 +61,15 @@ export function useRecipes({ call, status, pantry, staples }: { call: Call; stat
     } finally { setLoading(false) }
   }
 
+  // App recipes cost nothing to recompute, so follow the fridge and the conditions right away.
+  // (Gemini results are only re-matched below; asking Gemini again stays a button press.)
+  useEffect(() => {
+    if (source === 'local' && !loading && requestedKey !== '') setRecipes(fallback())
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps -- only when the fridge or the conditions change
+
+  // "冷蔵庫にある" marks and match % always reflect the current fridge, even for older results.
+  const shown = recipes.map((recipe) => scoreRecipe(recipe, pantry, staples))
+
   useEffect(() => {
     if (status === 'loading' || initialRequested.current) return
     initialRequested.current = true
@@ -72,5 +81,5 @@ export function useRecipes({ call, status, pantry, staples }: { call: Call; stat
     } else void refresh()
   }, [status]) // eslint-disable-line react-hooks/exhaustive-deps -- only the first time the data is ready
 
-  return { recipes, loading, source, message, stale, refresh, budgetYen, setBudgetYen, maxMinutes, setMaxMinutes, equipment, setEquipment }
+  return { recipes: shown, loading, source, message, stale, refresh, budgetYen, setBudgetYen, maxMinutes, setMaxMinutes, equipment, setEquipment }
 }

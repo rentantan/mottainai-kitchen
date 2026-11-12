@@ -158,9 +158,12 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
   }
 
   /** Undo "使った" / "作った！". `item` is the item as it was before, used to bring back what was used up. */
-  function undoConsume(entries: { logId: string; item: PantryItem }[]) {
+  function undoConsume(entries: { logId: string; item: PantryItem }[], cookedSavedId?: string) {
     hide()
     void mutate(async () => {
+      if (cookedSavedId) {
+        try { setSavedRecipes((await call<{ items: SavedRecipe[] }>(`/api/recipes/saved/${cookedSavedId}/cooked`, { method: 'DELETE' })).items) } catch { /* the count is a nicety; still undo the food */ }
+      }
       const state = await call<PantryState>('/api/pantry/undo-consume', {
         method: 'POST', body: { entries: entries.map(({ logId, item }) => ({ logId, item: toWrite(item), createdAt: item.createdAt })) },
       })
@@ -233,12 +236,24 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
   }
 
   function handleCooked(entries: { id: string; amount: number }[]) {
+    const savedEntry = selectedRecipe ? findSaved(selectedRecipe, savedRecipes) : undefined
     void mutate(async () => {
       const before = new Map(pantry.map((row) => [row.id, row]))
       const state = await call<PantryState & { logIds: string[] }>('/api/pantry/consume-batch', { method: 'POST', body: { items: entries } })
       setPantry(state.items); setConsumed(state.consumedCount); setWaste(state.waste ?? EMPTY_WASTE); setSelectedRecipe(null)
       const undoEntries = entries.map((entry, index) => ({ logId: state.logIds[index], item: before.get(entry.id) as PantryItem }))
-      return { message: `ごちそうさま！${entries.length}品の食材を減らしました`, action: { label: '元に戻す', onClick: () => undoConsume(undoEntries) } }
+      let cookedCount: number | undefined
+      if (savedEntry) {
+        try {
+          const result = await call<{ items: SavedRecipe[] }>(`/api/recipes/saved/${savedEntry.id}/cooked`, { method: 'POST' })
+          setSavedRecipes(result.items)
+          cookedCount = result.items.find((row) => row.id === savedEntry.id)?.cookedCount
+        } catch { /* the food was already reduced; a missing count is not worth an error */ }
+      }
+      return {
+        message: `ごちそうさま！${entries.length}品の食材を減らしました${cookedCount ? `（このレシピは${cookedCount}回目）` : ''}`,
+        action: { label: '元に戻す', onClick: () => undoConsume(undoEntries, cookedCount ? savedEntry?.id : undefined) },
+      }
     })
   }
 

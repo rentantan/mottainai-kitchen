@@ -295,13 +295,14 @@ body{background:radial-gradient(1200px 500px at 85% -10%,#eef5e8 0%,transparent 
 .saved-recipes-heading h2{margin:0;font-size:16px;font-weight:800;color:#2d3b31;letter-spacing:-.3px}
 .saved-count{margin-left:auto;font-size:12px;font-weight:700;color:var(--muted)}
 .saved-empty,.saved-hint{margin:8px 0 0;font-size:13px;color:var(--muted);line-height:1.7}
-.saved-list{list-style:none;margin:10px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
+.saved-list{list-style:none;margin:10px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px}
 .saved-row{width:100%;display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#fbfcfa;text-align:left;color:inherit;transition:border-color .15s,background .15s}
 .saved-row:hover{border-color:#cfe0cf;background:var(--green-soft)}
 .saved-emoji{flex:none;font-size:24px}
 .saved-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .saved-body strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .saved-body small{display:flex;align-items:center;gap:3px;font-size:12px;color:var(--muted)}
-.saved-expiring{flex:none;display:inline-flex;align-items:center;gap:2px;font-size:11px;font-weight:700}
+.saved-expiring{display:inline-flex;align-items:center;gap:2px;font-size:11px;font-weight:700}
 .saved-arrow{flex:none;color:#47734e}
-@media(max-width:580px){.saved-recipes{padding:13px}.saved-list{grid-template-columns:1fr}.saved-expiring{display:none}}
+@media(max-width:580px){.saved-recipes{padding:13px}.saved-list{grid-template-columns:1fr}}
+.saved-body small.saved-cooked{color:var(--green);font-weight:700}

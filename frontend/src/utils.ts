@@ -174,13 +174,14 @@ export function findSaved(recipe: { name: string }, saved: SavedRecipe[]) {
 
 /**
  * Saved recipes matched against the current fridge: ones that use soon-to-expire food first,
- * then the ones needing the fewest extra purchases, then the most recently saved.
+ * then the ones needing the fewest extra purchases, then the most cooked, then the most recently saved.
  */
 export function rankSavedRecipes(saved: SavedRecipe[], pantry: PantryItem[], staples: string[]): Recipe[] {
   return saved
     .filter((entry) => entry.recipe.ingredients?.length)
-    .map((entry, index) => ({ index, recipe: scoreRecipe({ ...entry.recipe, id: `saved-${entry.id}` }, pantry, staples) }))
+    .map((entry, index) => ({ index, recipe: { ...scoreRecipe({ ...entry.recipe, id: `saved-${entry.id}` }, pantry, staples), cookedCount: entry.cookedCount ?? 0, lastCookedAt: entry.lastCookedAt ?? null } }))
     .sort((a, b) => (b.recipe.expiryPriorityScore ?? 0) - (a.recipe.expiryPriorityScore ?? 0)
-      || a.recipe.missingIngredients.length - b.recipe.missingIngredients.length || a.index - b.index)
+      || a.recipe.missingIngredients.length - b.recipe.missingIngredients.length
+      || (b.recipe.cookedCount ?? 0) - (a.recipe.cookedCount ?? 0) || a.index - b.index)
     .map(({ recipe }) => recipe)
 }

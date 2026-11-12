@@ -2,8 +2,18 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowRight, BookmarkCheck, CheckCircle2, ChefHat, Clock3, Flame, Plus, Refrigerator, Sparkles, Wallet, X } from 'lucide-react'
 import type { PantryItem, Recipe, SavedRecipe } from '../types'
-import { rankSavedRecipes } from '../utils'
+import { daysUntil, rankSavedRecipes } from '../utils'
 import type { Equipment } from '../data'
+
+/** "今日" / "昨日" / "3日前" / "11/2" for the last time a saved recipe was cooked. */
+function lastCookedText(iso: string) {
+  const days = -daysUntil(iso.slice(0, 10))
+  if (days <= 0) return '今日'
+  if (days === 1) return '昨日'
+  if (days < 7) return `${days}日前`
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? '' : `${date.getMonth() + 1}/${date.getDate()}`
+}
 
 const STAPLE_SUGGESTIONS = ['しょうゆ', '塩', 'こしょう', '砂糖', 'サラダ油', 'みりん', '酒', '味噌', 'マヨネーズ', 'ケチャップ', 'ごま油', '酢']
 
@@ -29,7 +39,7 @@ export function RecipesView({ recipes, loading, stale, source, message, budgetYe
     <section className="welcome-row recipe-welcome"><div><div className="eyebrow"><span className="eyebrow-dot" /> COOK SOMETHING GOOD</div><h1>大学生の自炊を、<span>安く・簡単に。</span></h1><p className="page-subtitle">講義やアルバイトで忙しい日も、一人分・節約・時短。期限が近い食材から献立を考えよう。</p></div><button className="outline-button" onClick={onShowPantry}><Refrigerator size={16} />食材を確認</button></section>
     <div className="recipe-intro"><div className="recipe-intro-icon"><Sparkles size={23} /></div><div><h2>冷蔵庫から、節約レシピをAI提案</h2><p>Geminiが一人分・低予算・短時間で作れる献立を3つ考えます。</p></div>
       <button className={`refresh-recipes ${stale ? 'refresh-stale' : ''}`} onClick={onRefresh} disabled={loading}>{loading ? '提案中…' : stale ? '新しい条件で提案' : '別のレシピを提案'} <Sparkles size={15} /></button></div>
-    {stale && <p className="stale-note" role="status">食材や条件が変わりました。「新しい条件で提案」を押すと反映されます。</p>}
+    {stale && <p className="stale-note" role="status">{source === 'local' ? '食材や条件に合わせてアプリ内レシピを選び直しました。「新しい条件で提案」を押すとAIにも提案してもらえます。' : '食材や条件が変わりました。「新しい条件で提案」を押すと反映されます。'}</p>}
     <section className="student-preferences" aria-label="レシピの希望条件">
       <div className="student-preference-label"><span>🎓</span><div><strong>大学生の一人暮らし節約モード</strong><small>1人分・安い食材・少ない洗い物を優先</small></div></div>
       <label>1食の予算<select value={budgetYen} onChange={(event) => onBudget(Number(event.target.value) as 300 | 500 | 700)}><option value={300}>300円以内</option><option value={500}>500円以内</option><option value={700}>700円以内</option></select></label>
@@ -45,7 +55,7 @@ export function RecipesView({ recipes, loading, stale, source, message, budgetYe
       </div>
     </section>
     <div className="recipe-grid" aria-busy={loading}>{loading ? [0, 1, 2].map((i) => <article className="recipe-card skeleton-card" key={i}><div className="recipe-art skeleton" /><div className="recipe-card-content"><span className="skeleton skeleton-line short" /><span className="skeleton skeleton-line" /><span className="skeleton skeleton-line" /></div></article>)
-      : recipes.map((recipe, index) => <article className={`recipe-card ${stale ? 'recipe-card-stale' : ''}`} key={recipe.id}>
+      : recipes.map((recipe, index) => <article className={`recipe-card ${stale && source !== 'local' ? 'recipe-card-stale' : ''}`} key={recipe.id}>
         <div className={`recipe-art recipe-art-${recipe.id} recipe-tone-${index % 3}`}><span className="recipe-plate">{recipe.emoji}</span><span className="recipe-match"><CheckCircle2 size={14} /> 食材一致 {recipe.matchPercent}%</span></div>
         <div className="recipe-card-content">
           <div className="recipe-tags"><span><Clock3 size={13} />{recipe.minutes}分</span><span><ChefHat size={13} />{recipe.difficulty}</span>{recipe.estimatedCostYen !== undefined && <span><Wallet size={13} />約{recipe.estimatedCostYen}円/人</span>}{recipe.usesExpiring > 0 && <span className="expiring-tag"><Flame size={12} />期限間近を活用</span>}{recipe.microwaveOnly && <span>レンジだけ</span>}</div>
@@ -61,8 +71,7 @@ export function RecipesView({ recipes, loading, stale, source, message, budgetYe
         : <><p className="saved-hint">今の冷蔵庫の中身で照らし合わせ、期限が近い食材を使えるものから並べています。</p>
           <ul className="saved-list">{saved.map((recipe) => <li key={recipe.id}><button type="button" className="saved-row" onClick={() => onSelect(recipe)}>
             <span className="saved-emoji">{recipe.emoji}</span>
-            <span className="saved-body"><strong>{recipe.name}</strong><small><Clock3 size={12} />{recipe.minutes}分{recipe.estimatedCostYen != null && <> · 約{recipe.estimatedCostYen}円</>} · {recipe.missingIngredients.length ? `買い足し${recipe.missingIngredients.length}品` : '食材がそろっています'}</small></span>
-            {recipe.usesExpiring > 0 && <span className="expiring-tag saved-expiring"><Flame size={12} />期限間近を活用</span>}
+            <span className="saved-body"><strong>{recipe.name}</strong>{recipe.usesExpiring > 0 && <span className="expiring-tag saved-expiring"><Flame size={12} />期限間近を活用</span>}<small><Clock3 size={12} />{recipe.minutes}分{recipe.estimatedCostYen != null && <> · 約{recipe.estimatedCostYen}円</>} · {recipe.missingIngredients.length ? `買い足し${recipe.missingIngredients.length}品` : '食材がそろっています'}</small>{recipe.cookedCount ? <small className="saved-cooked">{recipe.cookedCount}回作った{recipe.lastCookedAt && <> · 最後は{lastCookedText(recipe.lastCookedAt)}</>}</small> : null}</span>
             <ArrowRight size={15} className="saved-arrow" />
           </button></li>)}</ul></>}
     </section>

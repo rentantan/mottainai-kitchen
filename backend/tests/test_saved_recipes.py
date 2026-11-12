@@ -65,3 +65,24 @@ def test_deleting_account_removes_saved_recipes(client, make_user):
     import database
     with database.db_connection() as connection:
         assert connection.execute("SELECT COUNT(*) FROM saved_recipes WHERE id = ?", (saved_id,)).fetchone()[0] == 0
+
+
+def test_cooked_count_and_undo(client, make_user):
+    _, headers = make_user()
+    saved_id = client.post("/api/recipes/saved", json=_recipe(), headers=headers).json()["id"]
+    first = client.post(f"/api/recipes/saved/{saved_id}/cooked", headers=headers).json()["items"][0]
+    assert first["cookedCount"] == 1 and first["lastCookedAt"]
+    assert client.post(f"/api/recipes/saved/{saved_id}/cooked", headers=headers).json()["items"][0]["cookedCount"] == 2
+    # Re-saving the same dish keeps the count.
+    assert client.post("/api/recipes/saved", json=_recipe(), headers=headers).json()["items"][0]["cookedCount"] == 2
+    client.delete(f"/api/recipes/saved/{saved_id}/cooked", headers=headers)
+    back = client.delete(f"/api/recipes/saved/{saved_id}/cooked", headers=headers).json()["items"][0]
+    assert back["cookedCount"] == 0 and back["lastCookedAt"] is None
+    assert client.delete(f"/api/recipes/saved/{saved_id}/cooked", headers=headers).json()["items"][0]["cookedCount"] == 0
+
+
+def test_cooked_needs_own_recipe(client, make_user):
+    _, alice = make_user()
+    _, bob = make_user()
+    saved_id = client.post("/api/recipes/saved", json=_recipe(), headers=alice).json()["id"]
+    assert client.post(f"/api/recipes/saved/{saved_id}/cooked", headers=bob).status_code == 404
