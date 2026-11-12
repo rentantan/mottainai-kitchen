@@ -63,6 +63,16 @@ class UndoConsumeRequest(BaseModel):
     entries: list[UndoConsumeEntry] = Field(min_length=1, max_length=50)
 
 
+class StockEntry(BaseModel):
+    shoppingId: str = Field(min_length=1, max_length=64)
+    item: PantryItemWrite
+
+
+class StockFromShoppingRequest(BaseModel):
+    """Bought items on the shopping list, registered in the fridge in one go."""
+    entries: list[StockEntry] = Field(min_length=1, max_length=50)
+
+
 class RecipePreferences(BaseModel):
     budget_yen: Literal[300, 500, 700] = 500
     max_minutes: Literal[10, 20, 30] = 20

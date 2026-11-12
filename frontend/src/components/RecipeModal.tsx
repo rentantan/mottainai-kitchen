@@ -64,7 +64,7 @@ export function RecipeModal({ recipe, pantry, staples, busy, saved, canSave, onT
       <h3 className="steps-heading"><Utensils size={17} />作り方</h3>
       {recipe.steps.length ? <ol className="recipe-steps">{recipe.steps.map((step, index) => <li key={index}><span>{index + 1}</span><p>{step}</p></li>)}</ol> : <p className="recipe-external-note">作り方の情報が取得できませんでした。別のレシピを提案し直してください。</p>}
       <div className="recipe-safety-note"><AlertTriangle size={15} /><p>期限切れの食材は状態を確認し、異臭・変色などがある場合は使用しないでください。肉や卵は十分に加熱してください。</p></div>
-      <button className="primary-button recipe-modal-done" onClick={startCooking}><Check size={16} />作った！食材を減らす</button>
+      <div className="sticky-actions recipe-done-bar"><button className="primary-button recipe-modal-done" onClick={startCooking}><Check size={16} />作った！食材を減らす</button></div>
     </div> : <div className="recipe-modal-body">
       <h3><ChefHat size={17} />使った食材を冷蔵庫から減らす</h3>
       {cookLines.length ? <>
@@ -75,7 +75,7 @@ export function RecipeModal({ recipe, pantry, staples, busy, saved, canSave, onT
         </div>)}</div>
         {cookInvalid && <div className="form-error" role="alert">チェックした食材には使った量を入力してください。</div>}
       </> : <p className="recipe-external-note">冷蔵庫に登録された食材はこのレシピに使われていません。</p>}
-      <div className="modal-actions cook-actions">
+      <div className="modal-actions cook-actions sticky-actions">
         <button type="button" className="cancel-button" onClick={() => setCookLines(null)}><ArrowLeft size={14} />戻る</button>
         <button type="button" className="primary-button" disabled={busy || cookInvalid || cookEntries.length === 0} onClick={() => onCooked(cookEntries)}><Check size={16} />{cookEntries.length}品を減らす</button>
       </div>

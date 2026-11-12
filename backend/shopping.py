@@ -7,9 +7,9 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 
-from database import CurrentUser, _read_staples, db_connection
+from database import CurrentUser, _ensure_user_state, _insert_pantry_item, _read_staples, db_connection
 from ingredients import matches_name
-from models import ShoppingItemCreate, ShoppingItemUpdate, StaplesWrite
+from models import ShoppingItemCreate, ShoppingItemUpdate, StaplesWrite, StockFromShoppingRequest
 
 router = APIRouter(prefix="/api")
 
@@ -74,6 +74,23 @@ def update_shopping(item_id: str, payload: ShoppingItemUpdate, user: CurrentUser
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="買い物リストの項目が見つかりません")
         return {"items": _read_shopping(connection, user["id"])}
+
+
+@router.post("/shopping/stock")
+def stock_from_shopping(payload: StockFromShoppingRequest, user: CurrentUser) -> dict[str, Any]:
+    """Put bought items into the fridge and tick them off, in one transaction. Items ticked
+    in the shop can be registered too; rows deleted meanwhile are skipped."""
+    with db_connection(immediate=True) as connection:
+        _ensure_user_state(connection, user["id"])
+        added: list[dict[str, Any]] = []
+        for entry in payload.entries:
+            result = connection.execute(
+                "UPDATE shopping_items SET checked = 1 WHERE id = ? AND user_id = ?",
+                (entry.shoppingId, user["id"]),
+            )
+            if result.rowcount:
+                added.append(_insert_pantry_item(connection, entry.item, user["id"]))
+        return {"added": added, "items": _read_shopping(connection, user["id"])}
 
 
 @router.delete("/shopping/checked")

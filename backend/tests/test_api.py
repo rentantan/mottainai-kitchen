@@ -309,3 +309,18 @@ def test_login_required_messages_and_docs(client):
     paths = client.get("/openapi.json").json()["paths"]
     assert "security" in paths["/api/pantry"]["get"] and "security" in paths["/api/recipes/suggest"]["post"]
     assert "security" not in paths["/api/auth/login"]["post"]
+
+
+def test_stock_from_shopping_registers_and_ticks_off(client, make_user):
+    _, headers = make_user()
+    rows = client.post("/api/shopping", json={"names": ["卵", "もやし"]}, headers=headers).json()["items"]
+    egg = next(r for r in rows if r["name"] == "卵")
+    sprouts = next(r for r in rows if r["name"] == "もやし")
+    client.delete(f"/api/shopping/{sprouts['id']}", headers=headers)
+    body = {"entries": [{"shoppingId": egg["id"], "item": _item("卵", 14, quantity=6)},
+                        {"shoppingId": sprouts["id"], "item": _item("もやし", 2)}]}
+    result = client.post("/api/shopping/stock", json=body, headers=headers).json()
+    # The deleted row is skipped; the egg is added and ticked off.
+    assert [i["name"] for i in result["added"]] == ["卵"]
+    assert result["items"] == [{**egg, "checked": True}]
+    assert len(client.get("/api/pantry", headers=headers).json()["items"]) == 1

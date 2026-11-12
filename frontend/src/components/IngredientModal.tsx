@@ -82,14 +82,17 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
         })}</div>
       </div>
       <label className="frozen-toggle"><input type="checkbox" checked={frozen} onChange={(e) => changeFrozen(e.target.checked)} /><span>❄️ 冷凍保存している<small>期限の目安が約1か月になります。使う前に解凍してください</small></span></label>
-      <div className="form-two-col">
       <label className="form-label">カテゴリ<select value={category} onChange={(e) => { setCategory(e.target.value as Category); touch('category') }}>{categoryOptions.map((option) => <option key={option} value={option}>{categoryEmoji[option]} {option}</option>)}</select></label>
-      <label className="form-label">値段 <small>任意・円</small><input type="number" inputMode="numeric" min="0" max={100000} step="1" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="例：198" /></label>
-      </div>
-      <p className="price-hint">値段を入れておくと、捨ててしまったときに「もったいない記録」へ金額で残ります。</p>
-      <label className="form-label">メモ <small>任意・300文字まで</small><textarea rows={2} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="例：開封済み、冷凍保存中..." /></label>
+      <details className="form-optional" open={Boolean(item?.priceYen != null || item?.note)}>
+        <summary>値段・メモ <small>任意</small></summary>
+        <div className="form-optional-body">
+          <label className="form-label">値段 <small>円</small><input type="number" inputMode="numeric" min="0" max={100000} step="1" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="例：198" /></label>
+          <p className="price-hint">値段を入れておくと、捨ててしまったときに「もったいない記録」へ金額で残ります。</p>
+          <label className="form-label">メモ <small>300文字まで</small><textarea rows={2} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="例：開封済み、冷凍保存中..." /></label>
+        </div>
+      </details>
       {validation && <div className="form-error" role="alert">{validation}</div>}
-      <div className="modal-actions"><button type="button" className="cancel-button" onClick={onClose}>キャンセル</button><button type="submit" className="primary-button"><Check size={16} />{item ? '変更を保存' : '食材を追加'}</button></div>
+      <div className="modal-actions sticky-actions"><button type="button" className="cancel-button" onClick={onClose}>キャンセル</button><button type="submit" className="primary-button"><Check size={16} />{item ? '変更を保存' : '食材を追加'}</button></div>
     </form>
   </section></div>
 }

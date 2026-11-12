@@ -349,3 +349,39 @@ body{background:radial-gradient(1200px 500px at 85% -10%,#eef5e8 0%,transparent 
 @media(max-width:580px){
   .urgent-section .section-description,.pantry-section .section-description{display:none}
 }
+.stock-panel{width:min(100%,560px)}
+.stock-all-button{width:100%;margin:12px 0 4px}
+.stock-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.stock-row{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #e6ece2;border-radius:10px;padding:9px 10px;background:#fff;transition:opacity .15s}
+.stock-row-off{opacity:.55;background:#fafbf8}
+.stock-check{display:flex;align-items:center;gap:8px;min-width:0;flex:1;cursor:pointer}
+.stock-check input{width:17px;height:17px;accent-color:#376e4e;flex-shrink:0}
+.stock-name{display:flex;flex-direction:column;min-width:0}
+.stock-name strong{font-size:14px;color:#3d493f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stock-name small{font-size:11px;color:#71766f}
+.stock-fields{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.stock-qty{width:118px}
+.stock-qty input[type=number]{width:52px}
+.stock-unit{width:50px;border-left:1px solid #e6ece2!important}
+.stock-date{display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+.stock-date input{border:1px solid #e1e7de;border-radius:8px;background:#fcfdfb;padding:6px 8px;font-size:13px;color:#3b493d}
+.stock-date small{font-size:11px;color:#71766f;padding-left:2px}
+@media(max-width:580px){
+  .stock-row{flex-direction:column;align-items:stretch}
+  .stock-fields{justify-content:space-between}
+}
+.stock-qty{gap:0;border:1px solid #e1e7de;border-radius:8px;background:#fcfdfb;overflow:hidden}
+.stock-qty input{border:0;background:transparent;padding:7px 8px;font-size:13px;color:#3b493d;outline:none;min-width:0}
+.stock-date input{width:142px}
+/* Primary actions stay reachable at the bottom of long modals (the panel is the scroller). */
+.sticky-actions{position:sticky;bottom:-24px;z-index:2;background:linear-gradient(#ffffff00,#fff 14px);margin-bottom:-24px;padding:18px 0 24px}
+.recipe-modal-body .sticky-actions{bottom:-23px;margin-bottom:-23px;padding-bottom:23px}
+.recipe-done-bar .recipe-modal-done{margin-top:0}
+.form-optional{border:1px solid #e6ece2;border-radius:9px;background:#fcfdfb}
+.form-optional>summary{cursor:pointer;list-style:none;padding:11px 12px;font-size:14px;font-weight:700;color:#4d5a4e;display:flex;align-items:center;gap:6px}
+.form-optional>summary::-webkit-details-marker{display:none}
+.form-optional>summary::after{content:'＋';margin-left:auto;color:#6a936b;font-weight:700}
+.form-optional[open]>summary::after{content:'－'}
+.form-optional>summary small{font-weight:500;color:#70756f;font-size:12px}
+.form-optional-body{display:flex;flex-direction:column;gap:12px;padding:0 12px 12px}
+.form-optional-body .price-hint{margin:-4px 0 0}

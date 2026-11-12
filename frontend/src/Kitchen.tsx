@@ -18,6 +18,8 @@ import { ConsumeModal } from './components/ConsumeModal'
 import { RecipeModal } from './components/RecipeModal'
 import { DeleteModal } from './components/DeleteModal'
 import { AccountModal } from './components/AccountModal'
+import { StockModal } from './components/StockModal'
+import type { StockEntry } from './components/StockModal'
 import type { DeleteReason } from './components/DeleteModal'
 
 export type Tab = 'pantry' | 'recipes' | 'shopping'
@@ -50,6 +52,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
   // A ref as well: undo buttons in toasts call mutate() from an older render, where `busy` is stale.
   const busyRef = useRef(false)
   const [showAccount, setShowAccount] = useState(false)
+  const [showStock, setShowStock] = useState(false)
   const { toast, show, hide } = useToast()
   const shoppingList = useShopping(call, show)
   const shopping = shoppingList.items
@@ -265,6 +268,20 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
     })
   }
 
+  /** Register several bought items from the shopping list at once (and tick them off). */
+  function stockFromShopping(entries: StockEntry[]) {
+    void mutate(async () => {
+      const result = await call<{ added: PantryItem[]; items: ShoppingItem[] }>('/api/shopping/stock', { method: 'POST', body: { entries } })
+      setPantry((current) => [...result.added, ...current])
+      shoppingList.replace(result.items)
+      setShowStock(false)
+      return {
+        message: `${result.added.length}品を冷蔵庫に登録しました`,
+        action: { label: '冷蔵庫を見る', onClick: () => { hide(); setActiveTab('pantry') } },
+      }
+    })
+  }
+
   function saveStaples(names: string[]) {
     void mutate(async () => {
       const result = await call<{ names: string[] }>('/api/staples', { method: 'PUT', body: { names } })
@@ -313,7 +330,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
         {activeTab === 'shopping' && <ShoppingView items={shopping} busy={busy}
           onAdd={(name) => addToShopping([name])}
           onToggle={shoppingList.toggle} onDelete={shoppingList.remove} onClearChecked={shoppingList.clearChecked}
-          onMoveToPantry={(item) => setFormName(item.name)} />}
+          onMoveToPantry={(item) => setFormName(item.name)} onStockAll={() => setShowStock(true)} />}
         <footer className="page-footer"><span>© 2026 mottainai kitchen</span><span>{status === 'ready' ? 'SQLiteデータベースに保存中' : status === 'loading' ? '読み込み中…' : 'オフライン（変更は保存されません）'}</span><span>食材を大切に、毎日のごはんを豊かに。</span></footer>
       </main>
 
@@ -321,6 +338,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
       {showForm && <IngredientModal item={editing} initialName={formName ?? ''} onClose={closeForm} onSave={handleSave} />}
       {deleting && <DeleteModal item={deleting} onClose={() => setDeleting(null)} onDelete={(reason) => handleDelete(deleting, reason)} />}
       {consuming && <ConsumeModal item={consuming} onClose={() => setConsuming(null)} onConsume={(amount) => handleConsume(consuming, amount)} />}
+      {showStock && <StockModal items={shopping} busy={busy} onClose={() => setShowStock(false)} onSave={stockFromShopping} />}
       {showAccount && <AccountModal email={email} call={call} onClose={() => setShowAccount(false)} onDone={(message) => show(message)} onDeleted={onAccountDeleted} />}
       {selectedRecipe && <RecipeModal recipe={selectedRecipe} pantry={pantry} staples={staples} busy={busy} saved={findSaved(selectedRecipe, savedRecipes) !== undefined} canSave={status === 'ready'} onToggleSaved={() => toggleSaved(selectedRecipe)} onClose={() => setSelectedRecipe(null)} onAddToShopping={addToShopping} onCooked={handleCooked} />}
     </div>
