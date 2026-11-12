@@ -25,7 +25,18 @@ export function LoginScreen({ notice, onAuthenticated }: { apiBase: string; noti
     }
   }
 
-  return <main className="auth-page"><section className="auth-card">
+  return <main className="auth-page"><aside className="auth-showcase" aria-hidden="true">
+    <div className="auth-showcase-inner">
+      <div className="auth-showcase-emoji"><span>🥬</span><span>🥚</span><span>🍅</span><span>🥕</span><span>🍞</span><span>🥛</span></div>
+      <h2>食材を、<br />最後までおいしく。</h2>
+      <p>大学生の一人暮らしのための、期限管理と節約レシピのキッチンノート。</p>
+      <ul className="auth-features">
+        <li><span>⏰</span>期限が近い食材をひと目でチェック</li>
+        <li><span>🍳</span>冷蔵庫の中身からAIが1人分レシピを提案</li>
+        <li><span>🛒</span>足りない食材はそのまま買い物リストへ</li>
+      </ul>
+    </div>
+  </aside><section className="auth-card">
     <div className="auth-brand"><div className="brand-mark"><Leaf size={23} strokeWidth={2.4} /></div><div><div className="brand-name">mottainai</div><div className="brand-sub">KITCHEN</div></div></div>
     <div className="auth-heading"><div className="modal-eyebrow">MY KITCHEN</div><h1>{mode === 'login' ? 'おかえりなさい' : 'キッチンをはじめよう'}</h1><p>{mode === 'login' ? 'ログインして冷蔵庫の中身を確認しましょう。' : 'メールアドレスを登録して食材管理を始めましょう。'}</p></div>
     {notice && !error && <div className="form-notice" role="status">{notice}</div>}

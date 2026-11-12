@@ -28,6 +28,7 @@ export function ShoppingView({ items, busy, onAdd, onToggle, onDelete, onClearCh
     <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-dot" /> SHOPPING LIST</div><h1>買い物リスト</h1><p className="page-subtitle">レシピの「買い足し」から追加できます。買ったら「冷蔵庫へ」で期限ごと登録しよう。</p></div></section>
     <section className="shopping-panel">
       <form className="shopping-form" onSubmit={submit}><input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="例：もやし" aria-label="買うものを追加" /><button className="primary-button" type="submit" disabled={busy || !name.trim()}><Plus size={16} />追加</button></form>
+      {items.length > 0 && <div className="shopping-progress" aria-label={`${items.length}件中${done.length}件を購入済み`}><div className="shopping-progress-text"><strong>{done.length}<small> / {items.length}</small></strong><span>{open.length ? `あと${open.length}品` : 'ぜんぶ買えました 🎉'}</span></div><div className="shopping-progress-bar"><span style={{ width: `${(done.length / items.length) * 100}%` }} /></div></div>}
       {items.length === 0 ? <div className="empty-list"><div className="empty-list-emoji"><ListChecks size={28} /></div><h3>買い物リストは空です</h3><p>レシピの詳細から「買い足しを買い物リストに追加」できます。</p></div> : <>
         <ul className="shopping-list">{open.map(row)}</ul>
         {done.length > 0 && <><div className="shopping-done-heading"><span>購入済み {done.length}件</span><button className="text-action red-text" disabled={busy} onClick={onClearChecked}><Trash2 size={13} />まとめて削除</button></div><ul className="shopping-list">{done.map(row)}</ul></>}

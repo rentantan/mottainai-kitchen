@@ -39,8 +39,8 @@ export function RecipesView({ recipes, loading, stale, source, message, budgetYe
       </div>
     </section>
     <div className="recipe-grid" aria-busy={loading}>{loading ? [0, 1, 2].map((i) => <article className="recipe-card skeleton-card" key={i}><div className="recipe-art skeleton" /><div className="recipe-card-content"><span className="skeleton skeleton-line short" /><span className="skeleton skeleton-line" /><span className="skeleton skeleton-line" /></div></article>)
-      : recipes.map((recipe) => <article className={`recipe-card ${stale ? 'recipe-card-stale' : ''}`} key={recipe.id}>
-        <div className={`recipe-art recipe-art-${recipe.id}`}>{recipe.emoji}<span className="recipe-match"><CheckCircle2 size={14} /> 食材一致 {recipe.matchPercent}%</span></div>
+      : recipes.map((recipe, index) => <article className={`recipe-card ${stale ? 'recipe-card-stale' : ''}`} key={recipe.id}>
+        <div className={`recipe-art recipe-art-${recipe.id} recipe-tone-${index % 3}`}><span className="recipe-plate">{recipe.emoji}</span><span className="recipe-match"><CheckCircle2 size={14} /> 食材一致 {recipe.matchPercent}%</span></div>
         <div className="recipe-card-content">
           <div className="recipe-tags"><span><Clock3 size={13} />{recipe.minutes}分</span><span><ChefHat size={13} />{recipe.difficulty}</span>{recipe.estimatedCostYen !== undefined && <span><Wallet size={13} />約{recipe.estimatedCostYen}円/人</span>}{recipe.usesExpiring > 0 && <span className="expiring-tag"><Flame size={12} />期限間近を活用</span>}</div>
           <h3>{recipe.name}</h3><p className="recipe-description">{recipe.description}</p>{recipe.source && <p className="recipe-source-label">提案元：{recipe.source}</p>}
