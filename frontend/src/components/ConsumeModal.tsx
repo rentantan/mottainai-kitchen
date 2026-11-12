@@ -27,7 +27,7 @@ export function ConsumeModal({ item, onClose, onConsume }: { item: PantryItem; o
     <div className="ingredient-form">
       <div className="consume-presets">{presets.map((preset) => <button key={preset.label} type="button" className="consume-preset" onClick={() => onConsume(preset.amount)}>{preset.label}</button>)}</div>
       <form onSubmit={submit} className="consume-custom">
-        <label className="form-label">量を入力<div className="consume-input"><input type="number" inputMode="decimal" min="0.01" step="any" value={custom} onChange={(e) => { setCustom(e.target.value); setError('') }} placeholder="例：100" autoFocus /><span>{item.unit}</span></div></label>
+        <label className="form-label">量を入力<div className="consume-input"><input type="number" inputMode="decimal" min="0.01" step="any" value={custom} onChange={(e) => { setCustom(e.target.value); setError('') }} placeholder="例：100" /><span>{item.unit}</span></div></label>
         <button type="submit" className="primary-button"><Check size={16} />記録する</button>
       </form>
       {error && <div className="form-error" role="alert">{error}</div>}

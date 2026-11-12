@@ -306,3 +306,46 @@ body{background:radial-gradient(1200px 500px at 85% -10%,#eef5e8 0%,transparent 
 .saved-arrow{flex:none;color:#47734e}
 @media(max-width:580px){.saved-recipes{padding:13px}.saved-list{grid-template-columns:1fr}}
 .saved-body small.saved-cooked{color:var(--green);font-weight:700}
+
+/* ---- UI/UX refresh: one-tap recipe conditions, collapsible staples, compact mobile, add button ---- */
+.pref-group{display:inline-flex;align-items:center;gap:4px;padding:3px;border:1px solid #e1e8dc;border-radius:10px;background:#fbfcf9}
+.pref-label{font-size:12px;font-weight:700;color:#6d776b;padding:0 6px 0 7px;white-space:nowrap}
+.pref-group button{border:0;background:transparent;color:#5c6a5a;border-radius:7px;padding:6px 10px;font-size:13px;font-weight:600;white-space:nowrap;transition:background .15s,color .15s}
+.pref-group button:hover{background:#eef4ea}
+.pref-group button.selected{background:#376e4e;color:#fff;box-shadow:0 1px 3px #1f3d2a33}
+.staples-editor>summary{list-style:none;cursor:pointer;align-items:center;user-select:none}
+.staples-editor>summary::-webkit-details-marker{display:none}
+.staples-summary{font-size:13px;color:#5f6b60;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.staples-toggle{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;color:#356c4c;margin-left:auto}
+.staples-toggle svg{transition:transform .15s}
+.staples-editor[open] .staples-toggle svg{transform:rotate(180deg)}
+.staples-heading{flex-wrap:nowrap}
+.staples-note{display:block;margin-top:6px;font-size:12px;color:#5f6b60}
+.icon-row-spacer{display:inline-block;width:29px;flex-shrink:0}
+.quantity-text{white-space:nowrap}
+.fab-add{display:none}
+@media(max-width:580px){
+  .welcome-row{padding:16px 18px;gap:10px}
+  .welcome-row .eyebrow,.welcome-row .page-subtitle{display:none}
+  .welcome-row h1{font-size:20px}
+  .welcome-row>.primary-button,.recipe-welcome .outline-button{display:none}
+  .welcome-row+*{margin-top:14px}
+  .urgent-grid{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:10px;margin:0;padding:2px 2px 8px;scroll-padding:0 2px;scrollbar-width:none}
+  .urgent-grid::-webkit-scrollbar{display:none}
+  .urgent-grid>*{flex:0 0 72%;scroll-snap-align:start}
+  .student-preferences .student-preference-label{display:none}
+  .pref-group{width:100%}
+  .pref-group button{flex:1;padding:8px 4px}
+  .pref-label{min-width:38px}
+  .icon-row-spacer{display:none}
+  .fab-add{display:grid;place-items:center;position:fixed;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));width:54px;height:54px;border:0;border-radius:50%;background:#376e4e;color:#fff;box-shadow:0 8px 22px #1f3d2a4d;z-index:25}
+  .fab-add:active{transform:scale(.95)}
+}
+@media(max-width:580px){
+  .recipe-intro{flex-wrap:wrap}
+  .recipe-intro p{display:none}
+  .refresh-recipes{width:100%;justify-content:center;margin-left:0;padding:11px}
+}
+@media(max-width:580px){
+  .urgent-section .section-description,.pantry-section .section-description{display:none}
+}

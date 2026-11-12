@@ -85,12 +85,14 @@ export function PantryView({ pantry, loading, filter, onFilter, waste, consumed,
           <td className="cell-expiry"><div className="expiry-cell"><span className={`expiry-dot ${expiryClass(days)}`} /><div><div className="expiry-date">{new Date(`${item.expiryDate}T00:00:00`).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })}</div><div className={`expiry-sub ${expiryClass(days)}`}>{expiryText(days)}</div><div className={`freshness-bar ${expiryClass(days)}`} aria-hidden><span style={{ width: `${Math.max(6, Math.min(100, ((days + 1) / 8) * 100))}%` }} /></div></div></div></td>
           <td className="cell-actions"><div className="row-actions"><button className="small-action consume-action" onClick={() => onConsume(item)} title="使った量を記録"><Check size={14} /><span>使った</span></button>{item.frozen
             ? <button className="icon-row-action freeze-action is-frozen" onClick={() => onFreeze(item, false)} title="解凍した（期限を明日にする）" aria-label={`${item.name}を解凍した`}><Snowflake size={15} /></button>
-            : canFreeze(item) && <button className="icon-row-action freeze-action" onClick={() => onFreeze(item, true)} title="冷凍する（期限を約1か月延ばす）" aria-label={`${item.name}を冷凍する`}><Snowflake size={15} /></button>}<button className="icon-row-action" onClick={() => onEdit(item)} title="編集" aria-label={`${item.name}を編集`}><Pencil size={15} /></button><button className="icon-row-action delete-action" onClick={() => onDelete(item)} title="削除" aria-label={`${item.name}を削除`}><Trash2 size={15} /></button></div></td>
+            : canFreeze(item) ? <button className="icon-row-action freeze-action" onClick={() => onFreeze(item, true)} title="冷凍する（期限を約1か月延ばす）" aria-label={`${item.name}を冷凍する`}><Snowflake size={15} /></button>
+            : <span className="icon-row-spacer" aria-hidden />}<button className="icon-row-action" onClick={() => onEdit(item)} title="編集" aria-label={`${item.name}を編集`}><Pencil size={15} /></button><button className="icon-row-action delete-action" onClick={() => onDelete(item)} title="削除" aria-label={`${item.name}を削除`}><Trash2 size={15} /></button></div></td>
         </tr> })}</tbody></table></div>
         : <div className="empty-list"><div className="empty-list-emoji">{query ? '🔎' : '🥦'}</div><h3>{query ? '食材が見つかりませんでした' : 'この条件に合う食材はありません'}</h3><p>検索条件を変えるか、新しい食材を追加しましょう。</p><button className="outline-button" onClick={() => { setQuery(''); onFilter('all'); setCategoryFilter('すべて') }}>条件をリセット</button></div>}
     </section>
     </>}
 
     {!loading && <WastePanel waste={waste} consumed={consumed} />}
+    {!isEmpty && <button className="fab-add" onClick={onAdd} aria-label="食材を追加"><Plus size={24} /></button>}
   </>
 }

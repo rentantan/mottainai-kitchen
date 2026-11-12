@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { ArrowRight, BookmarkCheck, CheckCircle2, ChefHat, Clock3, Flame, Plus, Refrigerator, Sparkles, Wallet, X } from 'lucide-react'
+import { ArrowRight, BookmarkCheck, CheckCircle2, ChefHat, ChevronDown, Clock3, Flame, Plus, Refrigerator, Sparkles, Wallet, X } from 'lucide-react'
 import type { PantryItem, Recipe, SavedRecipe } from '../types'
 import { daysUntil, rankSavedRecipes } from '../utils'
 import type { Equipment } from '../data'
@@ -25,6 +25,8 @@ export function RecipesView({ recipes, loading, stale, source, message, budgetYe
   onRefresh: () => void; onSelect: (recipe: Recipe) => void; onShowPantry: () => void
 }) {
   const [stapleInput, setStapleInput] = useState('')
+  // Collapsed by default so the recipes come first; opened for first-time users who have none yet.
+  const [staplesOpen, setStaplesOpen] = useState(() => staples.length === 0)
   // Re-matched against the fridge on every render (cheap: at most 50), so the marks follow pantry changes and the date.
   const saved = rankSavedRecipes(savedRecipes, pantry, staples)
   const suggestions = STAPLE_SUGGESTIONS.filter((name) => !staples.includes(name))
@@ -42,17 +44,18 @@ export function RecipesView({ recipes, loading, stale, source, message, budgetYe
     {stale && <p className="stale-note" role="status">{source === 'local' ? '食材や条件に合わせてアプリ内レシピを選び直しました。「新しい条件で提案」を押すとAIにも提案してもらえます。' : '食材や条件が変わりました。「新しい条件で提案」を押すと反映されます。'}</p>}
     <section className="student-preferences" aria-label="レシピの希望条件">
       <div className="student-preference-label"><span>🎓</span><div><strong>大学生の一人暮らし節約モード</strong><small>1人分・安い食材・少ない洗い物を優先</small></div></div>
-      <label>1食の予算<select value={budgetYen} onChange={(event) => onBudget(Number(event.target.value) as 300 | 500 | 700)}><option value={300}>300円以内</option><option value={500}>500円以内</option><option value={700}>700円以内</option></select></label>
-      <label>調理時間<select value={maxMinutes} onChange={(event) => onMaxMinutes(Number(event.target.value) as 10 | 20 | 30)}><option value={10}>10分以内</option><option value={20}>20分以内</option><option value={30}>30分以内</option></select></label>
-      <label>調理器具<select value={equipment} onChange={(event) => onEquipment(event.target.value as Equipment)}><option value="any">コンロ・レンジ</option><option value="microwave">電子レンジだけ</option></select></label>
-      <div className="staples-editor">
-        <div className="staples-heading"><strong>常備している調味料</strong><small>ここにある調味料は「買い足し」に数えません</small></div>
+      <div className="pref-group" role="group" aria-label="1食の予算"><span className="pref-label">予算</span>{([300, 500, 700] as const).map((value) => <button type="button" key={value} className={budgetYen === value ? 'selected' : ''} aria-pressed={budgetYen === value} onClick={() => onBudget(value)}>{value}円</button>)}</div>
+      <div className="pref-group" role="group" aria-label="調理時間"><span className="pref-label">時間</span>{([10, 20, 30] as const).map((value) => <button type="button" key={value} className={maxMinutes === value ? 'selected' : ''} aria-pressed={maxMinutes === value} onClick={() => onMaxMinutes(value)}>{value}分</button>)}</div>
+      <div className="pref-group" role="group" aria-label="調理器具"><span className="pref-label">器具</span>{([['any', 'コンロもOK'], ['microwave', 'レンジだけ']] as const).map(([value, label]) => <button type="button" key={value} className={equipment === value ? 'selected' : ''} aria-pressed={equipment === value} onClick={() => onEquipment(value)}>{label}</button>)}</div>
+      <details className="staples-editor" open={staplesOpen} onToggle={(event) => setStaplesOpen(event.currentTarget.open)}>
+        <summary className="staples-heading"><strong>常備している調味料</strong><span className="staples-summary">{staples.length ? `${staples.slice(0, 3).join('・')}${staples.length > 3 ? ` ほか${staples.length - 3}件` : ''}` : '未登録'}</span><span className="staples-toggle">{staplesOpen ? '閉じる' : '編集'}<ChevronDown size={14} /></span></summary>
+        <small className="staples-note">ここにある調味料は「買い足し」に数えません</small>
         <div className="staple-chips">
           {staples.map((name) => <span className="staple-chip" key={name}>{name}<button aria-label={`${name}を外す`} disabled={busy} onClick={() => onSaveStaples(staples.filter((s) => s !== name))}><X size={12} /></button></span>)}
           <form className="staple-form" onSubmit={addStaple}><input value={stapleInput} maxLength={30} onChange={(e) => setStapleInput(e.target.value)} placeholder="調味料を追加" aria-label="常備調味料を追加" /><button type="submit" disabled={busy || !stapleInput.trim()} aria-label="追加"><Plus size={14} /></button></form>
         </div>
         {suggestions.length > 0 && <div className="staple-suggestions">{suggestions.map((name) => <button key={name} disabled={busy} onClick={() => onSaveStaples([...staples, name])}><Plus size={11} />{name}</button>)}</div>}
-      </div>
+      </details>
     </section>
     <div className="recipe-grid" aria-busy={loading}>{loading ? [0, 1, 2].map((i) => <article className="recipe-card skeleton-card" key={i}><div className="recipe-art skeleton" /><div className="recipe-card-content"><span className="skeleton skeleton-line short" /><span className="skeleton skeleton-line" /><span className="skeleton skeleton-line" /></div></article>)
       : recipes.map((recipe, index) => <article className={`recipe-card ${stale && source !== 'local' ? 'recipe-card-stale' : ''}`} key={recipe.id}>
