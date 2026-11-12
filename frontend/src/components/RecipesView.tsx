@@ -23,7 +23,7 @@ export function RecipesView({ recipes, loading, stale, source, message, budgetYe
   return <>
     <section className="welcome-row recipe-welcome"><div><div className="eyebrow"><span className="eyebrow-dot" /> COOK SOMETHING GOOD</div><h1>大学生の自炊を、<span>安く・簡単に。</span></h1><p className="page-subtitle">講義やアルバイトで忙しい日も、一人分・節約・時短。期限が近い食材から献立を考えよう。</p></div><button className="outline-button" onClick={onShowPantry}><Refrigerator size={16} />食材を確認</button></section>
     <div className="recipe-intro"><div className="recipe-intro-icon"><Sparkles size={23} /></div><div><h2>冷蔵庫から、節約レシピをAI提案</h2><p>Geminiが一人分・低予算・短時間で作れる献立を3つ考えます。</p></div>
-      <button className={`refresh-recipes ${stale ? 'refresh-stale' : ''}`} onClick={onRefresh} disabled={loading}>{loading ? '提案中…' : stale ? '新しい条件で提案' : 'もう一度提案'} <Sparkles size={15} /></button></div>
+      <button className={`refresh-recipes ${stale ? 'refresh-stale' : ''}`} onClick={onRefresh} disabled={loading}>{loading ? '提案中…' : stale ? '新しい条件で提案' : '別のレシピを提案'} <Sparkles size={15} /></button></div>
     {stale && <p className="stale-note" role="status">食材や条件が変わりました。「新しい条件で提案」を押すと反映されます。</p>}
     <section className="student-preferences" aria-label="レシピの希望条件">
       <div className="student-preference-label"><span>🎓</span><div><strong>大学生の一人暮らし節約モード</strong><small>1人分・安い食材・少ない洗い物を優先</small></div></div>

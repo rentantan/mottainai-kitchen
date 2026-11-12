@@ -15,8 +15,12 @@ GEMINI_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "25"))
 # gives up while the backend is still spending quota.
 GEMINI_TOTAL_DEADLINE_SECONDS = float(os.getenv("GEMINI_TOTAL_DEADLINE_SECONDS", "45"))
 CACHE_SECONDS = int(os.getenv("RECIPE_CACHE_SECONDS", str(24 * 60 * 60)))
-MAX_REQUESTS_PER_HOUR_PER_IP = int(os.getenv("GEMINI_MAX_REQUESTS_PER_HOUR_PER_IP", "5"))
+# App-wide daily cap (protects the shared free quota) plus per-account limits, so one
+# account cannot use up the day's calls for everyone. The old *_PER_IP name is still read.
 MAX_REQUESTS_PER_DAY = int(os.getenv("GEMINI_MAX_REQUESTS_PER_DAY", "8"))
+MAX_REQUESTS_PER_DAY_PER_USER = int(os.getenv("GEMINI_MAX_REQUESTS_PER_DAY_PER_USER", "4"))
+MAX_REQUESTS_PER_HOUR_PER_USER = int(os.getenv(
+    "GEMINI_MAX_REQUESTS_PER_HOUR_PER_USER", os.getenv("GEMINI_MAX_REQUESTS_PER_HOUR_PER_IP", "3")))
 MIN_REQUEST_INTERVAL_SECONDS = float(os.getenv("GEMINI_MIN_REQUEST_INTERVAL_SECONDS", "20"))
-PROMPT_VERSION = "student-recipe-v5"  # bump when prompt or ingredient matching changes (invalidates cache)
+PROMPT_VERSION = "student-recipe-v6"  # bump when prompt or ingredient matching changes (invalidates cache)
 DATABASE_PATH = os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent / "data" / "mottainai.db"))

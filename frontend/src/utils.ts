@@ -64,6 +64,15 @@ const INGREDIENT_ALIAS_GROUPS: string[][] = [
   ['コンソメ', '顆粒コンソメ', '固形コンソメ'],
   ['めんつゆ', '麺つゆ'],
   ['ポン酢', 'ぽんず'],
+  // Single-character seasonings get their own groups so the longest-ending rule tells them apart (醤油 ≠ 油, ポン酢 ≠ 酢).
+  ['サラダ油', '油', '植物油', 'キャノーラ油', 'サラダオイル'],
+  ['ごま油'],
+  ['ラー油'],
+  ['オリーブオイル', 'オリーブ油'],
+  ['酢', '米酢', '穀物酢'],
+  ['塩', '食塩', 'あら塩'],
+  ['酒', '料理酒', '日本酒'],
+  ['みりん', '本みりん'],
 ]
 
 /** Remove spaces, unify full/half width and katakana→hiragana so ネギ / ねぎ compare equal. */
@@ -71,21 +80,42 @@ export function normalize(s: string) {
   return s.normalize('NFKC').replace(/\s/g, '').replace(/[ァ-ヶ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60)).toLowerCase()
 }
 const CANONICAL = new Map(INGREDIENT_ALIAS_GROUPS.flatMap((group) => group.map((alias) => [normalize(alias), normalize(group[0])] as const)))
-const canonical = (s: string) => { const n = normalize(s); return CANONICAL.get(n) ?? n }
+// Longest first, so 玉ねぎ wins over ねぎ and 醤油 over 油.
+const ALIASES_BY_LENGTH = [...CANONICAL.keys()].sort((a, b) => b.length - a.length)
+
+/** Drop bracketed notes, amounts and leftover words: 卵(Mサイズ) → 卵, キャベツ1/2 → キャベツ, 豆腐半分 → 豆腐. */
+function core(s: string) {
+  const n = normalize(s)
+  const stripped = n.replace(/\(.*?\)|\[.*?\]|【.*?】|「.*?」/g, '').replace(/(?<=.)\d.*$/, '').replace(/(半分|半玉|半丁|半袋|少々|適量|適宜|残り)$/, '')
+  return stripped || n
+}
+
+/** Canonical food named by the longest known ending (国産鶏もも肉 → 鶏肉, 新玉ねぎ → 玉ねぎ, 卵豆腐 → 豆腐), or null. */
+export function headFood(s: string) {
+  const c = core(s)
+  const alias = ALIASES_BY_LENGTH.find((key) => c.endsWith(key))
+  return alias === undefined ? null : CANONICAL.get(alias) ?? null
+}
 
 export function expiryPriorityPoints(days: number) {
   if (days < 0 || days > 7) return 0
   return [100, 80, 60, 40, 20, 15, 10, 5][days]
 }
-/** Same food if one name contains the other, or both map to the same alias group (鶏もも肉 ≒ 鶏肉). */
+/**
+ * Same food? Names ending with a known food match only when that food is the same (長ねぎ ≠ 玉ねぎ, 油 ≠ 醤油, 鶏もも肉 ≒ 鶏肉).
+ * Otherwise the shorter name (2+ characters) must end the longer one (トマト ≒ ミニトマト), so 米 ≠ 米酢.
+ * Keep in sync with backend/ingredients.py (matches_name).
+ */
 export function nameMatches(ingredient: string, name: string) {
-  const a = normalize(ingredient)
-  const b = normalize(name)
+  const a = core(ingredient)
+  const b = core(name)
   if (!a || !b) return false
-  if (a.includes(b) || b.includes(a)) return true
-  const ca = canonical(ingredient)
-  const cb = canonical(name)
-  return ca.includes(cb) || cb.includes(ca)
+  if (a === b) return true
+  const ha = headFood(a)
+  const hb = headFood(b)
+  if (ha !== null || hb !== null) return ha === hb
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a]
+  return shorter.length >= 2 && longer.endsWith(shorter)
 }
 export function ingredientMatches(ingredient: string, item: PantryItem) {
   return nameMatches(ingredient, item.name)

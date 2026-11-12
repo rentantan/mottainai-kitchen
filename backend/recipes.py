@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Request
 
 from config import (CACHE_SECONDS, GEMINI_API_KEY, GEMINI_MODEL, GEMINI_TIMEOUT_SECONDS, GEMINI_TOTAL_DEADLINE_SECONDS,
-                    MAX_REQUESTS_PER_DAY, MAX_REQUESTS_PER_HOUR_PER_IP,
+                    MAX_REQUESTS_PER_DAY, MAX_REQUESTS_PER_DAY_PER_USER, MAX_REQUESTS_PER_HOUR_PER_USER,
                     MIN_REQUEST_INTERVAL_SECONDS, PROMPT_VERSION)
 from database import _current_user, _read_staples, db_connection
 from ingredients import matches_name
@@ -252,6 +252,7 @@ RECIPE_RESPONSE_SCHEMA: dict[str, Any] = {
 }
 
 
+# Per-account Gemini call times (in memory; the daily counts live in SQLite).
 _request_history: dict[str, list[float]] = {}
 _last_request_at: dict[str, float] = {}
 
@@ -320,6 +321,13 @@ def _build_prompt(request: SuggestRequest, staples: list[str]) -> str:
     usable = [row for row in pantry_context if row["days_until_expiry"] >= 0]
     expired = [row for row in pantry_context if row["days_until_expiry"] < 0]
     prefs = request.preferences
+    avoid = ""
+    if request.exclude_recipe_names:
+        avoid = f"""
+【さっき提案した料理（今回は別の料理にする）】
+{json.dumps(request.exclude_recipe_names, ensure_ascii=False)}
+- 上の料理とは料理名も調理法も違うものにする（同じ料理の言い換えは不可）。
+"""
 
     return f"""あなたは、日本の大学生の一人暮らしを助ける節約料理アドバイザーです。
 今日の日付は {today.isoformat()} です。
@@ -342,7 +350,7 @@ def _build_prompt(request: SuggestRequest, staples: list[str]) -> str:
 
 【常備している調味料（買い足し不要・期限管理の対象外）】
 {json.dumps(staples, ensure_ascii=False)}
-
+{avoid}
 【レシピ作成ルール】
 1. 3つの異なるレシピを提案する。登録済み食材を優先し、期限が最も近いものを使えるレシピを上位候補にする。
 2. 期限の優先順位は「今日まで > あと1日 > あと2日 > あと3日 > あと4〜7日 > 8日以上」。期限が今日〜3日以内の食材がある場合、可能な限りその食材を使う。
@@ -554,7 +562,8 @@ def _format_gemini_recipes(raw: dict[str, Any], pantry: list[PantryInput], stapl
     return formatted
 
 
-def _format_fallback(pantry: list[PantryInput], preferences: RecipePreferences, staples: list[str]) -> list[dict[str, Any]]:
+def _format_fallback(pantry: list[PantryInput], preferences: RecipePreferences, staples: list[str],
+                     exclude_names: list[str] | None = None) -> list[dict[str, Any]]:
     today = today_japan()
     recipes: list[dict[str, Any]] = []
     for recipe in FALLBACK_RECIPES:
@@ -585,28 +594,42 @@ def _format_fallback(pantry: list[PantryInput], preferences: RecipePreferences, 
             "source": "アプリ内レシピ",
         })
     recipes.sort(key=lambda row: (row["nearestExpiryDays"], -row["expiryPriorityScore"], -row["usesExpiring"], -row["matchPercent"], row["estimatedCostYen"], row["minutes"]))
+    # On "別のレシピを提案", show recipes that were not on screen first.
+    excluded = set(exclude_names or [])
+    recipes.sort(key=lambda row: row["name"] in excluded)
     return recipes[:3]
 
 
-def _check_request_limit(client_ip: str) -> bool:
+def _user_rate_limit_message(user_id: str) -> str | None:
+    """Short-term per-account limits (interval and hourly). Read-only: nothing is recorded here."""
     now = time.time()
-    last = _last_request_at.get(client_ip, 0.0)
-    if now - last < MIN_REQUEST_INTERVAL_SECONDS:
-        return False
-    recent = [timestamp for timestamp in _request_history.get(client_ip, []) if now - timestamp < 3600]
-    if len(recent) >= MAX_REQUESTS_PER_HOUR_PER_IP:
-        return False
-    recent.append(now)
-    _request_history[client_ip] = recent
-    _last_request_at[client_ip] = now
-    return True
+    if now - _last_request_at.get(user_id, 0.0) < MIN_REQUEST_INTERVAL_SECONDS:
+        return f"AI提案は{int(MIN_REQUEST_INTERVAL_SECONDS)}秒以上あけて使ってください。少し待ってから再試行してください。"
+    recent = [stamp for stamp in _request_history.get(user_id, []) if now - stamp < 3600]
+    _request_history[user_id] = recent
+    if len(recent) >= MAX_REQUESTS_PER_HOUR_PER_USER:
+        return f"AI提案は1時間に{MAX_REQUESTS_PER_HOUR_PER_USER}回までです。時間をおいて再試行してください。"
+    return None
+
+
+def _record_user_request(user_id: str) -> None:
+    now = time.time()
+    _last_request_at[user_id] = now
+    _request_history.setdefault(user_id, []).append(now)
+
+
+def _forget_user_request(user_id: str) -> None:
+    """A failed call does not count toward the hourly limit (the interval still applies)."""
+    history = _request_history.get(user_id)
+    if history:
+        history.pop()
 
 
 def _cache_key(payload: SuggestRequest, user_id: str, staples: list[str]) -> str:
     """Same pantry + settings on the same Japan date reuse one AI result.
 
-    refresh_nonce is deliberately excluded: the old implementation included it,
-    so every click on "もう一度提案" bypassed the cache and consumed quota.
+    refresh / exclude_recipe_names are deliberately excluded: a refresh overwrites this
+    entry, so the next normal request shows the newest suggestions.
     """
     serializable = {
         "user_id": user_id,
@@ -671,16 +694,28 @@ def _write_persistent_recipe_cache(cache_key: str, user_id: str, result: dict[st
         )
 
 
-def _reserve_daily_gemini_request() -> tuple[bool, int]:
-    """Persist an app-side daily safety cap; cache hits never reach this function."""
+def _reserve_daily_gemini_request(user_id: str) -> str | None:
+    """Count one Gemini call against the app-wide and per-account daily caps.
+
+    Returns None when reserved, or the message to show when a cap is reached.
+    BEGIN IMMEDIATE makes check-and-increment atomic across concurrent requests.
+    Cache hits never reach this function.
+    """
     today = today_japan().isoformat()
     with db_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         row = connection.execute(
             "SELECT request_count FROM gemini_daily_usage WHERE usage_date = ?", (today,)
         ).fetchone()
-        used = int(row["request_count"]) if row else 0
-        if used >= MAX_REQUESTS_PER_DAY:
-            return False, used
+        app_used = int(row["request_count"]) if row else 0
+        row = connection.execute(
+            "SELECT request_count FROM gemini_user_daily_usage WHERE user_id = ? AND usage_date = ?", (user_id, today)
+        ).fetchone()
+        user_used = int(row["request_count"]) if row else 0
+        if user_used >= MAX_REQUESTS_PER_DAY_PER_USER:
+            return f"AI提案は1人1日{MAX_REQUESTS_PER_DAY_PER_USER}回までです（本日{user_used}回使用）。明日また使えます。"
+        if app_used >= MAX_REQUESTS_PER_DAY:
+            return f"アプリ全体のAI提案が本日の上限（{MAX_REQUESTS_PER_DAY}回）に達しました。明日また使えます。"
         connection.execute(
             """
             INSERT INTO gemini_daily_usage (usage_date, request_count) VALUES (?, 1)
@@ -688,47 +723,54 @@ def _reserve_daily_gemini_request() -> tuple[bool, int]:
             """,
             (today,),
         )
-        return True, used + 1
+        connection.execute(
+            """
+            INSERT INTO gemini_user_daily_usage (user_id, usage_date, request_count) VALUES (?, ?, 1)
+            ON CONFLICT(user_id, usage_date) DO UPDATE SET request_count = request_count + 1
+            """,
+            (user_id, today),
+        )
+    return None
+
+
+def _release_user_daily_request(user_id: str) -> None:
+    """Give a failed call back to the account. The app-wide count is kept, because the
+    provider may still have counted the attempt against the shared free quota."""
+    with db_connection() as connection:
+        connection.execute(
+            "UPDATE gemini_user_daily_usage SET request_count = MAX(request_count - 1, 0) "
+            "WHERE user_id = ? AND usage_date = ?",
+            (user_id, today_japan().isoformat()),
+        )
+
 
 @router.post("/suggest")
 def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]:
     user = _current_user(request)
+    user_id = user["id"]
     with db_connection() as connection:
-        staples = _read_staples(connection, user["id"])
-    key = _cache_key(payload, user["id"], staples)
+        staples = _read_staples(connection, user_id)
+    key = _cache_key(payload, user_id, staples)
 
-    # 1) Check SQLite cache first. This path does not call Gemini and does not
-    # consume the provider quota or our own daily request allowance.
-    cached = _read_persistent_recipe_cache(key)
-    if cached is not None:
-        return cached
+    # 1) Check SQLite cache first, unless the user explicitly asked for different recipes.
+    # This path does not call Gemini and does not consume any quota or app-side allowance.
+    if not payload.refresh:
+        cached = _read_persistent_recipe_cache(key)
+        if cached is not None:
+            return cached
 
-    fallback = _format_fallback(payload.pantry, payload.preferences, staples)
+    fallback = _format_fallback(payload.pantry, payload.preferences, staples, payload.exclude_recipe_names)
+
+    def local(message: str) -> dict[str, Any]:
+        return {"recipes": fallback, "source": "local", "cached": False, "message": message}
+
     if not GEMINI_API_KEY:
-        return {
-            "recipes": fallback,
-            "source": "local",
-            "cached": False,
-            "message": "Gemini APIキーが未設定のため、アプリ内の節約レシピを表示しています。",
-        }
+        return local("Gemini APIキーが未設定のため、アプリ内の節約レシピを表示しています。")
 
-    client_ip = request.client.host if request.client else "unknown"
-    if not _check_request_limit(client_ip):
-        return {
-            "recipes": fallback,
-            "source": "local",
-            "cached": False,
-            "message": f"アプリ側の連続リクエスト防止制限に達しました（{int(MIN_REQUEST_INTERVAL_SECONDS)}秒間隔・1時間{MAX_REQUESTS_PER_HOUR_PER_IP}回まで）。少し待ってから再試行してください。サンプルレシピを表示しています。",
-        }
-
-    allowed, daily_used = _reserve_daily_gemini_request()
-    if not allowed:
-        return {
-            "recipes": fallback,
-            "source": "local",
-            "cached": False,
-            "message": f"アプリ側でGemini呼び出しを1日{MAX_REQUESTS_PER_DAY}回までに制限しています（本日{daily_used}回使用）。翌日以降に再試行してください。サンプルレシピを表示しています。",
-        }
+    limit_message = _user_rate_limit_message(user_id) or _reserve_daily_gemini_request(user_id)
+    if limit_message:
+        return local(f"{limit_message} アプリ内の節約レシピを表示しています。")
+    _record_user_request(user_id)
 
     try:
         raw = _gemini_generate(_build_prompt(payload, staples))
@@ -741,18 +783,16 @@ def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]
         ]
         if not recipes:
             raise RuntimeError("選択した予算・調理時間に合うレシピを生成できませんでした。食材や予算を変更して再提案してください。")
-        result = {
-            "recipes": recipes,
-            "source": "gemini",
-            "cached": False,
-            "message": f"{GEMINI_MODEL} が一人分・節約・時短の条件で提案しました。成功した提案はSQLiteに24時間保存し、同じ条件ではAPIを再利用しません。材料費は概算です。",
-        }
-        _write_persistent_recipe_cache(key, user["id"], result)
-        return result
     except RuntimeError as exc:
-        return {
-            "recipes": fallback,
-            "source": "local",
-            "cached": False,
-            "message": f"{str(exc)} サンプルレシピを表示しています。",
-        }
+        _release_user_daily_request(user_id)
+        _forget_user_request(user_id)
+        return local(f"{str(exc)} アプリ内の節約レシピを表示しています。")
+
+    result = {
+        "recipes": recipes,
+        "source": "gemini",
+        "cached": False,
+        "message": f"{GEMINI_MODEL} が一人分・節約・時短の条件で提案しました。成功した提案はSQLiteに24時間保存し、同じ条件ではAPIを再利用しません。材料費は概算です。",
+    }
+    _write_persistent_recipe_cache(key, user_id, result)
+    return result

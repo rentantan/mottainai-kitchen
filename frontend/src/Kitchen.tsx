@@ -101,7 +101,9 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
   }), [pantry, staples, budgetYen, maxCookingMinutes])
   const recipesStale = !recipeLoading && requestedKey !== '' && requestedKey !== recipeKey
 
-  async function refreshRecipes() {
+  /** another=true: same conditions, but the user wants different dishes (skips the server cache). */
+  async function refreshRecipes(another = false) {
+    const shownNames = another ? recipes.map((recipe) => recipe.name) : []
     setRecipeLoading(true)
     setRequestedKey(recipeKey)
     try {
@@ -110,6 +112,8 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
         body: {
           pantry: pantry.map(({ name, quantity, unit, expiryDate, category }) => ({ name, quantity, unit, expiry_date: expiryDate, category })),
           preferences: { budget_yen: budgetYen, max_minutes: maxCookingMinutes },
+          refresh: another,
+          exclude_recipe_names: shownNames,
         },
         timeoutMs: FRONTEND_TIMEOUT_MS,
       })
@@ -246,7 +250,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
           onAdd={() => setFormName('')} onEdit={setEditing} onConsume={setConsuming} onDelete={setDeleting} onShowRecipes={() => setActiveTab('recipes')} />}
         {activeTab === 'recipes' && <RecipesView recipes={recipes} loading={recipeLoading || status === 'loading'} stale={recipesStale} source={recipeSource} message={recipeMessage}
           budgetYen={budgetYen} onBudget={setBudgetYen} maxMinutes={maxCookingMinutes} onMaxMinutes={setMaxCookingMinutes}
-          staples={staples} onSaveStaples={saveStaples} busy={busy} onRefresh={() => void refreshRecipes()} onSelect={setSelectedRecipe} onShowPantry={() => setActiveTab('pantry')} />}
+          staples={staples} onSaveStaples={saveStaples} busy={busy} onRefresh={() => void refreshRecipes(!recipesStale)} onSelect={setSelectedRecipe} onShowPantry={() => setActiveTab('pantry')} />}
         {activeTab === 'shopping' && <ShoppingView items={shopping} busy={busy}
           onAdd={(name) => addToShopping([name])}
           onToggle={(item) => updateShopping(() => call(`/api/shopping/${item.id}`, { method: 'PATCH', body: { checked: !item.checked } }))}

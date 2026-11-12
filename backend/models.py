@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Literal
-from pydantic import BaseModel, Field
+from typing import Annotated, Literal
+from pydantic import BaseModel, Field, StringConstraints
 
 Category = Literal["野菜・果物", "肉・魚", "乳製品・卵", "主食・麺", "調味料", "その他"]
 
@@ -54,7 +54,11 @@ class RecipePreferences(BaseModel):
 class SuggestRequest(BaseModel):
     pantry: list[PantryInput] = Field(default_factory=list, max_length=200)
     preferences: RecipePreferences = Field(default_factory=RecipePreferences)
-    refresh_nonce: int = Field(default=0, ge=0, le=1_000_000_000)
+    # refresh=True: the user asked for different recipes under the same conditions, so skip
+    # the cache and avoid the dishes in exclude_recipe_names (the ones currently shown).
+    refresh: bool = False
+    exclude_recipe_names: list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=60)]] = Field(
+        default_factory=list, max_length=9)
 
 
 class ShoppingItemCreate(BaseModel):

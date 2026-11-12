@@ -168,6 +168,16 @@ def init_database() -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gemini_user_daily_usage (
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                usage_date TEXT NOT NULL,
+                request_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, usage_date)
+            )
+            """
+        )
 
 
 def _db_item_to_api(row: sqlite3.Row) -> dict[str, Any]:
