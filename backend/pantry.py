@@ -36,14 +36,15 @@ def create_pantry_item(payload: PantryItemWrite, request: Request) -> dict[str, 
 
 @router.put("/reset")
 def reset_pantry(request: Request, payload: list[PantryItemWrite] = Body(max_length=200),
-                 keep_records: bool = False) -> dict[str, Any]:
-    """Replace all pantry items. keep_records=true leaves the use-up count and waste log alone."""
+                 reset_records: bool = False) -> dict[str, Any]:
+    """Replace all pantry items. The use-up count and waste log are kept unless
+    reset_records=true: wiping a user's history must be asked for explicitly."""
     user = _current_user(request)
     with db_connection(immediate=True) as connection:
         _ensure_user_state(connection, user["id"])
         connection.execute("DELETE FROM pantry_items WHERE user_id = ?", (user["id"],))
         connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user["id"],))
-        if not keep_records:
+        if reset_records:
             connection.execute("UPDATE app_state SET consumed_count = 0 WHERE user_id = ?", (user["id"],))
             connection.execute("DELETE FROM waste_log WHERE user_id = ?", (user["id"],))
             connection.execute("DELETE FROM consume_log WHERE user_id = ?", (user["id"],))

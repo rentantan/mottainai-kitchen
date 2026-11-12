@@ -6,6 +6,7 @@ import type { Equipment } from './data'
 import { ApiError, FRONTEND_TIMEOUT_MS, apiFetch } from './api'
 import { daysUntil, formatQuantity, getFallbackSuggestions, loadCachedPantry, saveCachedPantry } from './utils'
 import { useToast } from './hooks/useToast'
+import { useShopping } from './hooks/useShopping'
 import type { ToastAction } from './hooks/useToast'
 import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
@@ -38,7 +39,6 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
   const [pantry, setPantry] = useState<PantryItem[]>([])
   const [consumed, setConsumed] = useState(0)
   const [waste, setWaste] = useState<WasteSummary>(EMPTY_WASTE)
-  const [shopping, setShopping] = useState<ShoppingItem[]>([])
   const [staples, setStaples] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('pantry')
   const [filter, setFilter] = useState<PantryFilter>('all')
@@ -61,6 +61,8 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
   const [showAccount, setShowAccount] = useState(false)
   const initialRecipeRequested = useRef(false)
   const { toast, show, hide } = useToast()
+  const shoppingList = useShopping(call, show)
+  const shopping = shoppingList.items
   const showForm = editing !== null || formName !== null
 
   /** apiFetch with this session's token. A 401 ends the session instead of failing silently. */
@@ -91,7 +93,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
       setPantry(state.items)
       setConsumed(state.consumedCount)
       setWaste(state.waste ?? EMPTY_WASTE)
-      setShopping(shoppingState.items)
+      shoppingList.replace(shoppingState.items)
       setStaples(staplesState.names)
       setStatus('ready')
     } catch (error) {
@@ -188,7 +190,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
       closeForm()
       if (fromShopping) {
         const next = await call<{ items: ShoppingItem[] }>(`/api/shopping/${fromShopping.id}`, { method: 'PATCH', body: { checked: true } })
-        setShopping(next.items)
+        shoppingList.replace(next.items)
       }
       return target ? `${item.name}の情報を更新しました` : `${item.name}を冷蔵庫に追加しました`
     })
@@ -265,7 +267,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
     const message = pantry.length ? 'サンプル食材に入れ替えますか？ 今登録している食材は消えます（使い切り数ともったいない記録は残ります）。' : null
     if (message && !window.confirm(message)) return
     void mutate(async () => {
-      const state = await call<PantryState>('/api/pantry/reset?keep_records=true', { method: 'PUT', body: demoItems.map(toWrite) })
+      const state = await call<PantryState>('/api/pantry/reset', { method: 'PUT', body: demoItems.map(toWrite) })
       setPantry(state.items); setConsumed(state.consumedCount); setWaste(state.waste ?? EMPTY_WASTE); setFilter('all')
       return 'サンプル食材を入れました。試し終わったら「冷蔵庫の中身」の「すべて削除」で空に戻せます'
     })
@@ -277,7 +279,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
     const hasRecords = consumed > 0 || waste.totalCount > 0
     const resetRecords = hasRecords && window.confirm('使い切り数ともったいない記録もリセットしますか？\n（OK：リセットする／キャンセル：記録は残す）')
     void mutate(async () => {
-      const state = await call<PantryState>(`/api/pantry/reset${resetRecords ? '' : '?keep_records=true'}`, { method: 'PUT', body: [] })
+      const state = await call<PantryState>(`/api/pantry/reset${resetRecords ? '?reset_records=true' : ''}`, { method: 'PUT', body: [] })
       setPantry(state.items); setConsumed(state.consumedCount); setWaste(state.waste ?? EMPTY_WASTE); setFilter('all')
       return resetRecords ? '冷蔵庫と記録をリセットしました' : '冷蔵庫を空にしました（記録は残しています）'
     })
@@ -296,13 +298,9 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
   function addToShopping(names: string[]) {
     void mutate(async () => {
       const result = await call<{ items: ShoppingItem[]; added: number }>('/api/shopping', { method: 'POST', body: { names } })
-      setShopping(result.items)
+      shoppingList.replace(result.items)
       return result.added ? `買い物リストに${result.added}品を追加しました` : 'すでに買い物リストに入っています'
     })
-  }
-
-  function updateShopping(request: () => Promise<{ items: ShoppingItem[] }>, message?: string) {
-    void mutate(async () => { setShopping((await request()).items); return message })
   }
 
   function saveStaples(names: string[]) {
@@ -330,9 +328,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
           staples={staples} onSaveStaples={saveStaples} busy={busy} onRefresh={() => void refreshRecipes(!recipesStale)} onSelect={setSelectedRecipe} onShowPantry={() => setActiveTab('pantry')} />}
         {activeTab === 'shopping' && <ShoppingView items={shopping} busy={busy}
           onAdd={(name) => addToShopping([name])}
-          onToggle={(item) => updateShopping(() => call(`/api/shopping/${item.id}`, { method: 'PATCH', body: { checked: !item.checked } }))}
-          onDelete={(item) => updateShopping(() => call(`/api/shopping/${item.id}`, { method: 'DELETE' }))}
-          onClearChecked={() => updateShopping(() => call('/api/shopping/checked', { method: 'DELETE' }), 'チェック済みの項目を削除しました')}
+          onToggle={shoppingList.toggle} onDelete={shoppingList.remove} onClearChecked={shoppingList.clearChecked}
           onMoveToPantry={(item) => setFormName(item.name)} />}
         <footer className="page-footer"><span>© 2026 mottainai kitchen</span><span>{status === 'ready' ? 'SQLiteデータベースに保存中' : status === 'loading' ? '読み込み中…' : 'オフライン（変更は保存されません）'}</span><span>食材を大切に、毎日のごはんを豊かに。</span></footer>
       </main>

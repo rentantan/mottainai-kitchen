@@ -112,7 +112,7 @@ def test_waste_log_is_private_and_cleared_by_reset(client, make_user):
     client.post("/api/pantry/restore", json={"item": _item("卵", 3), "wasteId": deleted["wasteId"]}, headers=bob)
     assert client.get("/api/pantry", headers=alice).json()["waste"]["totalCount"] == 1
     assert client.get("/api/pantry", headers=bob).json()["waste"]["totalCount"] == 0
-    reset = client.put("/api/pantry/reset", json=[], headers=alice).json()
+    reset = client.put("/api/pantry/reset?reset_records=true", json=[], headers=alice).json()
     assert reset["waste"]["totalCount"] == 0
 
 
@@ -203,9 +203,9 @@ def test_reset_can_keep_records(client, make_user):
     _, headers = make_user()
     created = client.post("/api/pantry", json=_item("豆腐", -1, unit="丁"), headers=headers).json()
     client.delete(f"/api/pantry/{created['id']}?reason=discarded", headers=headers)
-    kept = client.put("/api/pantry/reset?keep_records=true", json=[], headers=headers).json()
+    kept = client.put("/api/pantry/reset", json=[], headers=headers).json()
     assert kept["items"] == [] and kept["waste"]["totalCount"] == 1
-    cleared = client.put("/api/pantry/reset", json=[], headers=headers).json()
+    cleared = client.put("/api/pantry/reset?reset_records=true", json=[], headers=headers).json()
     assert cleared["waste"]["totalCount"] == 0
 
 
