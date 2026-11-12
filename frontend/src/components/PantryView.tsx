@@ -1,17 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowRight, Check, ChevronDown, CircleCheck, Clock3, Flame, Leaf, ListFilter, Pencil, Plus, Refrigerator, Search, ShoppingBasket, Trash2 } from 'lucide-react'
-import type { PantryItem } from '../types'
+import type { PantryItem, WasteSummary } from '../types'
 import type { PantryFilter } from '../Kitchen'
 import { categoryEmoji, categoryOptions } from '../data'
 import { daysUntil, expiryClass, expiryText, formatQuantity, normalize } from '../utils'
+import { useDismiss } from '../hooks/useDismiss'
+import { WastePanel } from './WastePanel'
 
-export function PantryView({ pantry, loading, filter, onFilter, onAdd, onEdit, onConsume, onDelete, onShowRecipes }: {
-  pantry: PantryItem[]; loading: boolean; filter: PantryFilter; onFilter: (filter: PantryFilter) => void
+export function PantryView({ pantry, loading, filter, onFilter, waste, consumed, onAdd, onEdit, onConsume, onDelete, onShowRecipes }: {
+  pantry: PantryItem[]; loading: boolean; filter: PantryFilter; onFilter: (filter: PantryFilter) => void; waste: WasteSummary; consumed: number
   onAdd: () => void; onEdit: (item: PantryItem) => void; onConsume: (item: PantryItem) => void; onDelete: (item: PantryItem) => void; onShowRecipes: () => void
 }) {
   const [query, setQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('すべて')
   const [showCategoryMenu, setShowCategoryMenu] = useState(false)
+  const categoryMenuRef = useRef<HTMLDivElement>(null)
+  useDismiss(showCategoryMenu, () => setShowCategoryMenu(false), categoryMenuRef)
 
   const sortedPantry = useMemo(() => [...pantry].sort((a, b) => a.expiryDate.localeCompare(b.expiryDate)), [pantry])
   const expiredCount = pantry.filter((item) => daysUntil(item.expiryDate) < 0).length
@@ -50,7 +54,7 @@ export function PantryView({ pantry, loading, filter, onFilter, onAdd, onEdit, o
       <div className="list-toolbar">
         <div className="search-box"><Search size={17} /><input aria-label="食材を検索" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="食材名で検索..." /></div>
         <div className="toolbar-right">
-          <div className="filter-wrap"><button className={`filter-button ${showCategoryMenu ? 'filter-open' : ''}`} aria-expanded={showCategoryMenu} onClick={() => setShowCategoryMenu(!showCategoryMenu)}><ListFilter size={16} />{categoryFilter}<ChevronDown size={14} /></button>{showCategoryMenu && <div className="dropdown-menu">{['すべて', ...categoryOptions].map((category) => <button key={category} onClick={() => { setCategoryFilter(category); setShowCategoryMenu(false) }}>{category}{categoryFilter === category && <Check size={14} />}</button>)}</div>}</div>
+          <div className="filter-wrap" ref={categoryMenuRef}><button className={`filter-button ${showCategoryMenu ? 'filter-open' : ''}`} aria-expanded={showCategoryMenu} onClick={() => setShowCategoryMenu(!showCategoryMenu)}><ListFilter size={16} />{categoryFilter}<ChevronDown size={14} /></button>{showCategoryMenu && <div className="dropdown-menu">{['すべて', ...categoryOptions].map((category) => <button key={category} onClick={() => { setCategoryFilter(category); setShowCategoryMenu(false) }}>{category}{categoryFilter === category && <Check size={14} />}</button>)}</div>}</div>
           <div className="segmented-filter">{(['all', 'urgent', 'expired'] as const).map((key) => <button key={key} className={filter === key ? 'selected' : ''} aria-pressed={filter === key} onClick={() => onFilter(key)}>{{ all: 'すべて', urgent: '期限間近', expired: '期限切れ' }[key]}</button>)}</div>
         </div>
       </div>
@@ -64,5 +68,7 @@ export function PantryView({ pantry, loading, filter, onFilter, onAdd, onEdit, o
         </tr> })}</tbody></table></div>
         : <div className="empty-list"><div className="empty-list-emoji">{query ? '🔎' : '🥦'}</div><h3>{query ? '食材が見つかりませんでした' : 'この条件に合う食材はありません'}</h3><p>検索条件を変えるか、新しい食材を追加しましょう。</p><button className="outline-button" onClick={() => { setQuery(''); onFilter('all'); setCategoryFilter('すべて') }}>条件をリセット</button></div>}
     </section>
+
+    {!loading && <WastePanel waste={waste} consumed={consumed} />}
   </>
 }

@@ -14,6 +14,23 @@ from models import AuthCredentials, AuthSession
 
 router = APIRouter(prefix="/api/auth")
 
+# Brute-force guard: after this many failed logins for one email within the window,
+# further attempts are refused until the oldest failure ages out. In-memory only
+# (resets on restart), which is enough for a single-process deployment.
+MAX_LOGIN_FAILURES = 5
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+_login_failures: dict[str, list[float]] = {}
+
+
+def _recent_failures(email: str, now: float) -> list[float]:
+    recent = [stamp for stamp in _login_failures.get(email, []) if now - stamp < LOGIN_FAILURE_WINDOW_SECONDS]
+    if recent:
+        _login_failures[email] = recent
+    else:
+        _login_failures.pop(email, None)
+    return recent
+
+
 @router.post("/register", response_model=AuthSession)
 def register(payload: AuthCredentials) -> dict[str, str]:
     email = payload.email.strip().lower()
@@ -39,12 +56,19 @@ def register(payload: AuthCredentials) -> dict[str, str]:
 @router.post("/login", response_model=AuthSession)
 def login(payload: AuthCredentials) -> dict[str, str]:
     email = payload.email.strip().lower()
+    now = time.time()
+    failures = _recent_failures(email, now)
+    if len(failures) >= MAX_LOGIN_FAILURES:
+        wait_minutes = max(1, round((LOGIN_FAILURE_WINDOW_SECONDS - (now - failures[0])) / 60))
+        raise HTTPException(status_code=429, detail=f"ログインの失敗が続いたため一時的にロックしています。約{wait_minutes}分後に再試行してください。")
     with db_connection() as connection:
         user = connection.execute(
             "SELECT id, email, password_hash FROM users WHERE email = ?", (email,)
         ).fetchone()
     if user is None or not _verify_password(payload.password, user["password_hash"]):
+        _login_failures.setdefault(email, []).append(now)
         raise HTTPException(status_code=401, detail="メールアドレスまたはパスワードが違います")
+    _login_failures.pop(email, None)
     return _create_session(user["id"], user["email"])
 
 

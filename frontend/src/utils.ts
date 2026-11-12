@@ -36,15 +36,56 @@ export function formatQuantity(value: number) {
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100)
 }
 
-export function normalize(s: string) { return s.replace(/[ 　]/g, '').toLowerCase() }
+/**
+ * Spellings of the same ingredient; the first entry is canonical.
+ * Keep in sync with backend/ingredients.py (ALIAS_GROUPS).
+ */
+const INGREDIENT_ALIAS_GROUPS: string[][] = [
+  ['ごはん', 'ご飯', '白米', '米', 'ライス', '白ごはん'],
+  ['卵', 'たまご', '玉子', '鶏卵'],
+  ['鶏肉', '鶏もも肉', '鶏むね肉', '鶏胸肉', '鶏もも', '鶏むね', 'とり肉', 'ささみ', '鶏ささみ'],
+  ['豚肉', '豚こま', '豚こま肉', '豚こま切れ肉', '豚バラ', '豚バラ肉', '豚ロース'],
+  ['ひき肉', '挽き肉', '挽肉', '合いびき肉', '合挽き肉'],
+  ['ねぎ', '長ねぎ', '青ねぎ', '万能ねぎ', '小ねぎ', '葱', '長葱'],
+  ['玉ねぎ', 'たまねぎ', '玉葱'],
+  ['にんじん', '人参'],
+  ['じゃがいも', 'じゃが芋', '馬鈴薯'],
+  ['ほうれん草', 'ほうれんそう'],
+  ['しょうゆ', '醤油', 'しょう油'],
+  ['塩こしょう', '塩胡椒'],
+  ['こしょう', '胡椒'],
+  ['砂糖', 'さとう'],
+  ['味噌', 'みそ'],
+  ['豆腐', 'とうふ', '絹豆腐', '木綿豆腐'],
+  ['ツナ缶', 'ツナ', 'シーチキン'],
+  ['パスタ', 'スパゲッティ', 'スパゲティ'],
+  ['牛乳', 'ミルク'],
+  ['しめじ', 'ぶなしめじ'],
+  ['コンソメ', '顆粒コンソメ', '固形コンソメ'],
+  ['めんつゆ', '麺つゆ'],
+  ['ポン酢', 'ぽんず'],
+]
+
+/** Remove spaces, unify full/half width and katakana→hiragana so ネギ / ねぎ compare equal. */
+export function normalize(s: string) {
+  return s.normalize('NFKC').replace(/\s/g, '').replace(/[ァ-ヶ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60)).toLowerCase()
+}
+const CANONICAL = new Map(INGREDIENT_ALIAS_GROUPS.flatMap((group) => group.map((alias) => [normalize(alias), normalize(group[0])] as const)))
+const canonical = (s: string) => { const n = normalize(s); return CANONICAL.get(n) ?? n }
+
 export function expiryPriorityPoints(days: number) {
   if (days < 0 || days > 7) return 0
   return [100, 80, 60, 40, 20, 15, 10, 5][days]
 }
+/** Same food if one name contains the other, or both map to the same alias group (鶏もも肉 ≒ 鶏肉). */
 export function nameMatches(ingredient: string, name: string) {
   const a = normalize(ingredient)
   const b = normalize(name)
-  return Boolean(a && b) && (a.includes(b) || b.includes(a))
+  if (!a || !b) return false
+  if (a.includes(b) || b.includes(a)) return true
+  const ca = canonical(ingredient)
+  const cb = canonical(name)
+  return ca.includes(cb) || cb.includes(ca)
 }
 export function ingredientMatches(ingredient: string, item: PantryItem) {
   return nameMatches(ingredient, item.name)

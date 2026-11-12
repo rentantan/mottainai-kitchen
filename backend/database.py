@@ -143,6 +143,22 @@ def init_database() -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS waste_log (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                unit TEXT NOT NULL,
+                category TEXT NOT NULL,
+                emoji TEXT NOT NULL,
+                expiry_date TEXT NOT NULL,
+                discarded_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_waste_log_user_id ON waste_log(user_id, discarded_at)")
         connection.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (time.time(),))
         connection.execute(
             """
@@ -179,12 +195,39 @@ def _read_pantry_state(connection: sqlite3.Connection, user_id: str) -> dict[str
         "items": [_db_item_to_api(row) for row in rows],
         "consumedCount": int(state["consumed_count"] if state else 0),
         "initialized": bool(state["initialized"] if state else False),
+        "waste": _read_waste(connection, user_id),
     }
 
 
-def _insert_pantry_item(connection: sqlite3.Connection, item: PantryItemWrite, user_id: str) -> dict[str, Any]:
+WASTE_RECENT_LIMIT = 20
+
+
+def _read_waste(connection: sqlite3.Connection, user_id: str) -> dict[str, Any]:
+    """Discarded-food summary: the most recent entries plus all-time and this-month counts."""
+    rows = connection.execute(
+        "SELECT * FROM waste_log WHERE user_id = ? ORDER BY discarded_at DESC LIMIT ?", (user_id, WASTE_RECENT_LIMIT)
+    ).fetchall()
+    month_prefix = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y-%m")
+    counts = connection.execute(
+        "SELECT COUNT(*) AS total, SUM(CASE WHEN substr(discarded_at, 1, 7) = ? THEN 1 ELSE 0 END) AS month "
+        "FROM waste_log WHERE user_id = ?",
+        (month_prefix, user_id),
+    ).fetchone()
+    return {
+        "items": [{
+            "id": row["id"], "name": row["name"], "quantity": row["quantity"], "unit": row["unit"],
+            "category": row["category"], "emoji": row["emoji"], "expiryDate": row["expiry_date"],
+            "discardedAt": row["discarded_at"],
+        } for row in rows],
+        "totalCount": int(counts["total"] or 0),
+        "monthCount": int(counts["month"] or 0),
+    }
+
+
+def _insert_pantry_item(connection: sqlite3.Connection, item: PantryItemWrite, user_id: str,
+                        created_at: str | None = None) -> dict[str, Any]:
     item_id = str(uuid.uuid4())
-    created_at = datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()
+    created_at = created_at or datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()
     connection.execute(
         """INSERT INTO pantry_items
            (id, name, quantity, unit, expiry_date, category, emoji, note, created_at, user_id)

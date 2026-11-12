@@ -1,0 +1,120 @@
+import re
+from datetime import timedelta
+from pathlib import Path
+
+import auth
+from recipes import FALLBACK_RECIPES, today_japan
+
+
+def _item(name, days, quantity=1, unit="個", category="その他"):
+    return {"name": name, "quantity": quantity, "unit": unit, "category": category,
+            "expiryDate": (today_japan() + timedelta(days=days)).isoformat()}
+
+
+def test_login_locks_after_repeated_failures(client, make_user):
+    email, _ = make_user()
+    for _ in range(auth.MAX_LOGIN_FAILURES):
+        assert client.post("/api/auth/login", json={"email": email, "password": "wrong-pass"}).status_code == 401
+    locked = client.post("/api/auth/login", json={"email": email, "password": "password123"})
+    assert locked.status_code == 429
+    auth._login_failures.clear()
+    assert client.post("/api/auth/login", json={"email": email, "password": "password123"}).status_code == 200
+
+
+def test_successful_login_resets_failure_count(client, make_user):
+    email, _ = make_user()
+    for _ in range(auth.MAX_LOGIN_FAILURES - 1):
+        client.post("/api/auth/login", json={"email": email, "password": "wrong-pass"})
+    assert client.post("/api/auth/login", json={"email": email, "password": "password123"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": email, "password": "wrong-pass"}).status_code == 401
+    assert client.post("/api/auth/login", json={"email": email, "password": "password123"}).status_code == 200
+
+
+def test_pantry_is_isolated_per_user(client, make_user):
+    _, alice = make_user()
+    _, bob = make_user()
+    client.post("/api/pantry", json=_item("卵", 3), headers=alice)
+    assert [i["name"] for i in client.get("/api/pantry", headers=alice).json()["items"]] == ["卵"]
+    assert client.get("/api/pantry", headers=bob).json()["items"] == []
+
+
+def test_consume_reduces_then_removes_item(client, make_user):
+    _, headers = make_user()
+    item = client.post("/api/pantry", json=_item("卵", 3, quantity=2), headers=headers).json()
+    first = client.post(f"/api/pantry/{item['id']}/consume", json={"amount": 1}, headers=headers).json()
+    assert first["item"]["quantity"] == 1
+    second = client.post(f"/api/pantry/{item['id']}/consume", json={"amount": 1}, headers=headers).json()
+    assert second["item"] is None and second["consumedCount"] == 1
+
+
+def test_fallback_recipes_use_expiring_items_with_alias_names(client, make_user):
+    _, headers = make_user()
+    pantry = [
+        {"name": "鶏もも肉", "quantity": 250, "unit": "g", "category": "肉・魚", "expiry_date": (today_japan() + timedelta(days=0)).isoformat()},
+        {"name": "ご飯", "quantity": 2, "unit": "杯", "category": "主食・麺", "expiry_date": (today_japan() + timedelta(days=5)).isoformat()},
+    ]
+    data = client.post("/api/recipes/suggest", json={"pantry": pantry, "preferences": {"budget_yen": 500, "max_minutes": 20}},
+                       headers=headers).json()
+    assert data["source"] == "local"
+    top = data["recipes"][0]
+    assert top["id"] == "teriyaki-chicken-don"
+    assert {"鶏肉", "ごはん"} <= set(top["matchedIngredients"])
+
+
+def test_fallback_recipes_respect_budget_and_time(client, make_user):
+    _, headers = make_user()
+    data = client.post("/api/recipes/suggest", json={"pantry": [], "preferences": {"budget_yen": 300, "max_minutes": 10}},
+                       headers=headers).json()
+    assert data["recipes"]
+    assert all(r["minutes"] <= 10 and r["estimatedCostYen"] <= 300 for r in data["recipes"])
+
+
+def test_frontend_fallback_recipes_match_backend():
+    """The offline copy in frontend/src/data.ts must list the same recipes as the backend."""
+    data_ts = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "data.ts").read_text(encoding="utf-8")
+    frontend = re.findall(r"\{ id: '([^']+)', name: '([^']+)'.*?minutes: (\d+).*?estimatedCostYen: (\d+)", data_ts)
+    backend = [(r["id"], r["name"], str(r["minutes"]), str(r["estimatedCostYen"])) for r in FALLBACK_RECIPES]
+    assert sorted(frontend) == sorted(backend)
+
+
+def test_discard_is_logged_and_undo_restores_item(client, make_user):
+    _, headers = make_user()
+    created = client.post("/api/pantry", json=_item("牛乳", -1, unit="本"), headers=headers).json()
+    deleted = client.delete(f"/api/pantry/{created['id']}?reason=discarded", headers=headers).json()
+    assert deleted["wasteId"] and deleted["item"]["name"] == "牛乳"
+    assert deleted["waste"]["totalCount"] == 1 and deleted["waste"]["monthCount"] == 1
+    assert client.get("/api/pantry", headers=headers).json()["items"] == []
+
+    item = deleted["item"]
+    write = {key: item[key] for key in ("name", "quantity", "unit", "expiryDate", "category", "emoji", "note")}
+    restored = client.post("/api/pantry/restore", json={"item": write, "createdAt": item["createdAt"], "wasteId": deleted["wasteId"]},
+                           headers=headers).json()
+    assert restored["item"]["name"] == "牛乳" and restored["item"]["createdAt"] == item["createdAt"]
+    assert restored["waste"]["totalCount"] == 0
+    assert [i["name"] for i in client.get("/api/pantry", headers=headers).json()["items"]] == ["牛乳"]
+
+
+def test_plain_delete_is_not_logged_as_waste(client, make_user):
+    _, headers = make_user()
+    created = client.post("/api/pantry", json=_item("卵", 3), headers=headers).json()
+    deleted = client.delete(f"/api/pantry/{created['id']}", headers=headers).json()
+    assert deleted["wasteId"] is None and deleted["waste"]["totalCount"] == 0
+
+
+def test_waste_log_is_private_and_cleared_by_reset(client, make_user):
+    _, alice = make_user()
+    _, bob = make_user()
+    created = client.post("/api/pantry", json=_item("豆腐", -2, unit="丁"), headers=alice).json()
+    deleted = client.delete(f"/api/pantry/{created['id']}?reason=discarded", headers=alice).json()
+    # Bob cannot remove Alice's waste entry through restore.
+    client.post("/api/pantry/restore", json={"item": _item("卵", 3), "wasteId": deleted["wasteId"]}, headers=bob)
+    assert client.get("/api/pantry", headers=alice).json()["waste"]["totalCount"] == 1
+    assert client.get("/api/pantry", headers=bob).json()["waste"]["totalCount"] == 0
+    reset = client.put("/api/pantry/reset", json=[], headers=alice).json()
+    assert reset["waste"]["totalCount"] == 0
+
+
+def test_invalid_delete_reason_is_rejected(client, make_user):
+    _, headers = make_user()
+    created = client.post("/api/pantry", json=_item("卵", 3), headers=headers).json()
+    assert client.delete(f"/api/pantry/{created['id']}?reason=whatever", headers=headers).status_code == 422

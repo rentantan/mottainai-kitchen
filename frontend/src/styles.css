@@ -206,3 +206,42 @@ body{background:radial-gradient(1200px 500px at 85% -10%,#eef5e8 0%,transparent 
   .shopping-panel{padding:14px}
 }
 @media (prefers-reduced-motion:reduce){.auth-showcase-emoji span,.recipe-plate,.stat-card,.primary-button{animation:none;transition:none}}
+
+/* ---- Ingredient form: name-based guess & expiry shortcuts ---- */
+.form-label>label>span{font-size:12px;color:#9c6938;margin-left:3px}
+.preset-hint{display:flex;align-items:flex-start;gap:6px;margin:-6px 0 0;padding:8px 10px;border-radius:7px;background:#f1f6ec;color:#56745a;font-size:12px;line-height:1.6}.preset-hint svg{flex-shrink:0;margin-top:3px;color:#6a936b}
+.expiry-shortcuts{display:flex;flex-wrap:wrap;gap:6px}
+.expiry-shortcuts button{border:1px solid #e1e7de;background:#fff;color:#5d6d5f;border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600}
+.expiry-shortcuts button:hover{background:#f3f7f0;border-color:#c3d6bf}
+.expiry-shortcuts button.selected{background:#e9f1e8;border-color:#a7c6a6;color:#2f6745}
+
+/* ---- Delete reason dialog ---- */
+.delete-hint{margin:0;padding:9px 11px;border-radius:7px;background:#fff8eb;color:#846a3a;font-size:13px;line-height:1.6}
+.delete-choices{display:flex;flex-direction:column;gap:9px}
+.delete-choice{display:flex;align-items:center;gap:12px;text-align:left;border:1px solid #e1e7de;background:#fff;border-radius:10px;padding:13px 14px;color:#56655a}
+.delete-choice:hover{background:#f6f9f3;border-color:#c3d6bf}
+.delete-choice span{display:flex;flex-direction:column;gap:3px}.delete-choice strong{font-size:14px;color:#3c4a3f}.delete-choice small{font-size:12px;color:#717670}
+.delete-choice-waste svg{color:#b25b52}.delete-choice-waste:hover{background:#fff6f4;border-color:#efcfc8}
+
+/* ---- Toast action (undo) ---- */
+.toast-action{margin-left:6px;border:1px solid #ffffff66;background:#ffffff1f;color:#fff;border-radius:7px;padding:5px 10px;font-size:13px;font-weight:700;white-space:nowrap}
+.toast-action:hover{background:#ffffff33}
+
+/* ---- Waste log ---- */
+.waste-section{margin-top:34px}
+.waste-icon{background:#fcf0ed;color:#ae5e54}
+.waste-card{background:#fff;border:1px solid #e8ebe4;border-radius:12px;padding:16px 18px}
+.waste-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.waste-stats>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.waste-stat-label{font-size:13px;font-weight:600;color:#6c776d}
+.waste-stats strong{font-size:26px;font-weight:700;letter-spacing:-.8px;color:#2c3930}.waste-stats strong small{font-size:14px;font-weight:600;color:#70766e;margin-left:3px;letter-spacing:0}
+.waste-stat-note{font-size:12px;color:#717670}
+.waste-tip{display:flex;align-items:flex-start;gap:7px;margin:14px 0 0;padding:10px 12px;border-radius:8px;background:#fff8eb;color:#846a3a;font-size:13px;line-height:1.6}.waste-tip svg{flex-shrink:0;margin-top:2px}
+.waste-list{list-style:none;margin:14px 0 0;padding:0;border-top:1px solid #f0f2ed}
+.waste-list li{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f0f2ed}.waste-list li:last-child{border-bottom:0;padding-bottom:0}
+.waste-emoji{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:#f7f7f1;font-size:18px;flex-shrink:0}
+.waste-name{display:flex;flex-direction:column;gap:2px;min-width:0}.waste-name strong{font-size:14px;color:#3d493f}.waste-name small{font-size:12px;color:#717670}
+.waste-date{margin-left:auto;display:flex;align-items:center;gap:4px;font-size:12px;color:#a0645c;white-space:nowrap}
+.waste-empty{margin:14px 0 0;font-size:13px;color:#6f766e}
+@media(max-width:580px){.waste-card{padding:13px}.waste-stats{gap:7px}.waste-stats strong{font-size:21px}.waste-stat-label{font-size:12px}.waste-stat-note{font-size:11px}}
+.mini-stat-icon.red{background:#fcf0ed;color:#ae5e54}

@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import random
-import re
 import time
 from datetime import date, datetime
 from typing import Any
@@ -17,6 +16,7 @@ from config import (CACHE_SECONDS, GEMINI_API_KEY, GEMINI_MODEL, GEMINI_TIMEOUT_
                     MAX_REQUESTS_PER_DAY, MAX_REQUESTS_PER_HOUR_PER_IP,
                     MIN_REQUEST_INTERVAL_SECONDS, PROMPT_VERSION)
 from database import _current_user, _read_staples, db_connection
+from ingredients import matches_name
 from models import PantryInput, RecipePreferences, SuggestRequest
 
 router = APIRouter(prefix="/api/recipes")
@@ -104,6 +104,122 @@ FALLBACK_RECIPES: list[dict[str, Any]] = [
         ],
         "estimatedCostYen": 230,
     },
+    {
+        "id": "spinach-egg",
+        "name": "ほうれん草と卵のしょうゆ炒め",
+        "description": "傷みやすい葉物を一気に使い切れる、フライパンひとつの副菜。",
+        "minutes": 8,
+        "difficulty": "かんたん",
+        "emoji": "🥬",
+        "ingredients": ["ほうれん草", "卵", "しょうゆ"],
+        "ingredientDetails": ["ほうれん草 1/2袋", "卵 1個", "しょうゆ 小さじ1"],
+        "steps": [
+            "ほうれん草を洗い、4cm長さに切る。",
+            "フライパンに油をひき、ほうれん草を茎から炒める。",
+            "溶き卵を加え、卵にしっかり火が通るまで混ぜながら炒める。",
+            "しょうゆを回し入れて全体になじませる。",
+        ],
+        "estimatedCostYen": 130,
+    },
+    {
+        "id": "spinach-milk-pasta",
+        "name": "ほうれん草のミルクスープパスタ",
+        "description": "牛乳とコンソメで作る、生クリームなしのやさしいスープパスタ。",
+        "minutes": 15,
+        "difficulty": "かんたん",
+        "emoji": "🍝",
+        "ingredients": ["パスタ", "ほうれん草", "牛乳", "コンソメ"],
+        "ingredientDetails": ["パスタ 80g", "ほうれん草 1/4袋", "牛乳 150ml", "コンソメ 小さじ1"],
+        "steps": [
+            "鍋に水200mlとコンソメを入れて沸かし、半分に折ったパスタを入れる。",
+            "袋の表示時間どおりに混ぜながら煮る。",
+            "ゆで上がり2分前に、4cmに切ったほうれん草を加える。",
+            "牛乳を加えて弱火で温め、沸騰させないように仕上げる。",
+        ],
+        "estimatedCostYen": 200,
+    },
+    {
+        "id": "teriyaki-chicken-don",
+        "name": "鶏肉の照り焼き丼",
+        "description": "甘辛だれでごはんが進む、ボリューム満点の一人丼。",
+        "minutes": 15,
+        "difficulty": "ふつう",
+        "emoji": "🍗",
+        "ingredients": ["ごはん", "鶏肉", "しょうゆ", "砂糖"],
+        "ingredientDetails": ["ごはん 茶碗1杯", "鶏肉 120g", "しょうゆ 大さじ1", "砂糖 大さじ1/2"],
+        "steps": [
+            "鶏肉はひと口大に切る。",
+            "フライパンで皮目から焼き、ふたをして弱めの中火で中まで火を通す。",
+            "切り口が白くなったら、しょうゆと砂糖を加えて煮からめる。",
+            "ごはんにのせ、たれをかける。",
+        ],
+        "estimatedCostYen": 260,
+    },
+    {
+        "id": "moyashi-pork-steam",
+        "name": "もやしと豚肉のレンジ蒸し",
+        "description": "火を使わず電子レンジで完成。洗い物は耐熱皿だけ。",
+        "minutes": 10,
+        "difficulty": "かんたん",
+        "emoji": "🥢",
+        "ingredients": ["もやし", "豚肉", "ポン酢"],
+        "ingredientDetails": ["もやし 1袋", "豚肉 80g", "ポン酢 大さじ1"],
+        "steps": [
+            "耐熱皿にもやしを広げ、豚肉を重ならないようにのせる。",
+            "ふんわりラップをして、600Wで4〜5分加熱する。",
+            "豚肉の赤い部分がなくなったか確認し、足りなければ30秒ずつ追加加熱する。",
+            "ポン酢をかけていただく。",
+        ],
+        "estimatedCostYen": 200,
+    },
+    {
+        "id": "carrot-kinpira",
+        "name": "にんじんのきんぴら",
+        "description": "にんじん1本を作り置きおかずに。お弁当にも使える。",
+        "minutes": 10,
+        "difficulty": "かんたん",
+        "emoji": "🥕",
+        "ingredients": ["にんじん", "しょうゆ", "砂糖", "ごま油"],
+        "ingredientDetails": ["にんじん 1/2本", "しょうゆ 小さじ2", "砂糖 小さじ1", "ごま油 小さじ1"],
+        "steps": [
+            "にんじんを細切りにする。",
+            "フライパンにごま油を熱し、にんじんがしんなりするまで炒める。",
+            "しょうゆと砂糖を加え、汁気がなくなるまで炒める。",
+        ],
+        "estimatedCostYen": 60,
+    },
+    {
+        "id": "tomato-egg-soup",
+        "name": "トマトと卵のスープ",
+        "description": "あと一品ほしいときに。トマトの酸味で食欲がない日にも。",
+        "minutes": 8,
+        "difficulty": "かんたん",
+        "emoji": "🍅",
+        "ingredients": ["トマト", "卵", "コンソメ"],
+        "ingredientDetails": ["ミニトマト 5個", "卵 1個", "コンソメ 小さじ1"],
+        "steps": [
+            "ミニトマトを半分に切る。",
+            "小鍋に水200mlとコンソメを入れて沸かし、トマトを入れて1分煮る。",
+            "溶き卵を回し入れ、卵がふんわり固まるまでしっかり加熱する。",
+        ],
+        "estimatedCostYen": 120,
+    },
+    {
+        "id": "natto-egg-udon",
+        "name": "納豆たまごうどん",
+        "description": "冷凍うどんで10分。たんぱく質もとれる忙しい日の味方。",
+        "minutes": 10,
+        "difficulty": "かんたん",
+        "emoji": "🍜",
+        "ingredients": ["うどん", "納豆", "卵", "めんつゆ"],
+        "ingredientDetails": ["うどん 1玉", "納豆 1パック", "卵 1個", "めんつゆ 大さじ2"],
+        "steps": [
+            "うどんを袋の表示どおりに電子レンジで加熱する。",
+            "フライパンで目玉焼きを作り、ふたをして黄身まで火を通す。",
+            "うどんにめんつゆをかけ、納豆と卵をのせて混ぜる。",
+        ],
+        "estimatedCostYen": 170,
+    },
 ]
 
 
@@ -142,18 +258,6 @@ _last_request_at: dict[str, float] = {}
 
 def today_japan() -> date:
     return datetime.now(ZoneInfo("Asia/Tokyo")).date()
-
-
-def normalize(value: str) -> str:
-    return re.sub(r"[\s　]", "", value).lower()
-
-
-def matches_name(required: str, name: str) -> bool:
-    required_n = normalize(required)
-    name_n = normalize(name)
-    if not required_n or not name_n:
-        return False
-    return required_n in name_n or name_n in required_n
 
 
 def matches_ingredient(required: str, pantry_item: PantryInput) -> bool:

@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ArrowRight, Bell, CalendarDays, Settings2 } from 'lucide-react'
 import type { PantryItem } from '../types'
 import type { DataStatus, Tab } from '../Kitchen'
 import { daysUntil, expiryText, formatQuantity } from '../utils'
+import { useDismiss } from '../hooks/useDismiss'
 
 const TAB_LABEL: Record<Tab, string> = { pantry: '冷蔵庫の中身', recipes: 'レシピを探す', shopping: '買い物リスト' }
 
@@ -11,9 +12,11 @@ export function Topbar({ activeTab, email, status, pantryCount, consumed, notifi
   onNotification: (days: number) => void; onReset: () => void; onLogout: () => void
 }) {
   const [open, setOpen] = useState<'notifications' | 'profile' | null>(null)
+  const menusRef = useRef<HTMLDivElement>(null)
+  useDismiss(open !== null, () => setOpen(null), menusRef)
   return <header className="topbar">
     <div className="breadcrumb"><span>マイキッチン</span><span className="crumb-slash">/</span><strong>{TAB_LABEL[activeTab]}</strong></div>
-    <div className="topbar-right">
+    <div className="topbar-right" ref={menusRef}>
       <div className="today-pill"><CalendarDays size={15} /><span>{new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span></div>
       <div className="topbar-menu-wrap">
         <button className="icon-button" aria-label="期限アラートを開く" aria-expanded={open === 'notifications'} onClick={() => setOpen(open === 'notifications' ? null : 'notifications')}><Bell size={18} />{notificationItems.length > 0 && <span className="notification-dot" />}</button>

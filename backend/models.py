@@ -25,6 +25,13 @@ class PantryItemWrite(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
+class RestoreRequest(BaseModel):
+    """Undo a delete: re-create the item and drop the waste-log entry it produced, if any."""
+    item: PantryItemWrite
+    createdAt: str | None = Field(default=None, max_length=40)
+    wasteId: str | None = Field(default=None, max_length=64)
+
+
 class ConsumeRequest(BaseModel):
     # None keeps the old behaviour (use one unit).
     amount: float | None = Field(default=None, gt=0, le=100000)

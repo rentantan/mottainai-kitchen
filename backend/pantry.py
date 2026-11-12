@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
+import uuid
+from datetime import datetime
+from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from database import (_current_user, _db_item_to_api, _ensure_user_state, _insert_pantry_item,
-                      _read_pantry_state, db_connection)
-from models import BatchConsumeRequest, ConsumeRequest, PantryItemWrite
+                      _read_pantry_state, _read_waste, db_connection)
+from models import BatchConsumeRequest, ConsumeRequest, PantryItemWrite, RestoreRequest
 
 router = APIRouter(prefix="/api/pantry")
 
@@ -38,9 +41,21 @@ def reset_pantry(request: Request, payload: list[PantryItemWrite] = Body(max_len
         _ensure_user_state(connection, user["id"])
         connection.execute("DELETE FROM pantry_items WHERE user_id = ?", (user["id"],))
         connection.execute("UPDATE app_state SET consumed_count = 0, initialized = 1 WHERE user_id = ?", (user["id"],))
+        connection.execute("DELETE FROM waste_log WHERE user_id = ?", (user["id"],))
         for item in payload:
             _insert_pantry_item(connection, item, user["id"])
         return _read_pantry_state(connection, user["id"])
+
+
+@router.post("/restore")
+def restore_pantry_item(payload: RestoreRequest, request: Request) -> dict[str, Any]:
+    user = _current_user(request)
+    with db_connection() as connection:
+        _ensure_user_state(connection, user["id"])
+        item = _insert_pantry_item(connection, payload.item, user["id"], payload.createdAt)
+        if payload.wasteId:
+            connection.execute("DELETE FROM waste_log WHERE id = ? AND user_id = ?", (payload.wasteId, user["id"]))
+        return {"item": item, "waste": _read_waste(connection, user["id"])}
 
 
 @router.post("/consume-batch")
@@ -73,14 +88,25 @@ def update_pantry_item(item_id: str, payload: PantryItemWrite, request: Request)
 
 
 @router.delete("/{item_id}")
-def delete_pantry_item(item_id: str, request: Request) -> dict[str, bool]:
+def delete_pantry_item(item_id: str, request: Request, reason: Literal["removed", "discarded"] = "removed") -> dict[str, Any]:
+    """reason=discarded records the item in the waste log ("もったいない記録"); removed just deletes it."""
     user = _current_user(request)
     with db_connection() as connection:
-        result = connection.execute("DELETE FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"]))
-        if result.rowcount == 0:
+        row = connection.execute("SELECT * FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"])).fetchone()
+        if row is None:
             raise HTTPException(status_code=404, detail="食材が見つかりません")
+        connection.execute("DELETE FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"]))
         connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user["id"],))
-    return {"deleted": True}
+        waste_id = None
+        if reason == "discarded":
+            waste_id = str(uuid.uuid4())
+            connection.execute(
+                """INSERT INTO waste_log (id, user_id, name, quantity, unit, category, emoji, expiry_date, discarded_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (waste_id, user["id"], row["name"], row["quantity"], row["unit"], row["category"], row["emoji"],
+                 row["expiry_date"], datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()),
+            )
+        return {"deleted": True, "item": _db_item_to_api(row), "wasteId": waste_id, "waste": _read_waste(connection, user["id"])}
 
 
 @router.post("/{item_id}/consume")

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CircleCheck, RefreshCw } from 'lucide-react'
-import type { PantryItem, PantryState, Recipe, ShoppingItem } from './types'
+import type { PantryItem, PantryState, Recipe, ShoppingItem, WasteSummary } from './types'
 import { demoItems } from './data'
 import { ApiError, FRONTEND_TIMEOUT_MS, apiFetch } from './api'
 import { daysUntil, formatQuantity, getFallbackSuggestions, loadCachedPantry, saveCachedPantry } from './utils'
 import { useToast } from './hooks/useToast'
+import type { ToastAction } from './hooks/useToast'
 import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { PantryView } from './components/PantryView'
@@ -13,6 +14,8 @@ import { ShoppingView } from './components/ShoppingView'
 import { IngredientModal } from './components/IngredientModal'
 import { ConsumeModal } from './components/ConsumeModal'
 import { RecipeModal } from './components/RecipeModal'
+import { DeleteModal } from './components/DeleteModal'
+import type { DeleteReason } from './components/DeleteModal'
 
 export type Tab = 'pantry' | 'recipes' | 'shopping'
 export type PantryFilter = 'all' | 'urgent' | 'expired'
@@ -21,12 +24,17 @@ export type DataStatus = 'loading' | 'ready' | 'offline'
 type Budget = 300 | 500 | 700
 type Minutes = 10 | 20 | 30
 
+const EMPTY_WASTE: WasteSummary = { items: [], totalCount: 0, monthCount: 0 }
+/** A mutation may return a toast message, optionally with an action button such as "元に戻す". */
+type MutationResult = string | { message: string; action?: ToastAction } | void
+
 const toWrite = ({ name, quantity, unit, expiryDate, category, emoji, note }: PantryItem) => ({ name, quantity, unit, expiryDate, category, emoji, note })
 
 export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: string; email: string; onLogout: () => void; onSessionExpired: () => void }) {
   const [status, setStatus] = useState<DataStatus>('loading')
   const [pantry, setPantry] = useState<PantryItem[]>([])
   const [consumed, setConsumed] = useState(0)
+  const [waste, setWaste] = useState<WasteSummary>(EMPTY_WASTE)
   const [shopping, setShopping] = useState<ShoppingItem[]>([])
   const [staples, setStaples] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('pantry')
@@ -34,6 +42,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
   const [editing, setEditing] = useState<PantryItem | null>(null)
   const [formName, setFormName] = useState<string | null>(null)
   const [consuming, setConsuming] = useState<PantryItem | null>(null)
+  const [deleting, setDeleting] = useState<PantryItem | null>(null)
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null)
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [recipeLoading, setRecipeLoading] = useState(false)
@@ -44,7 +53,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
   const [maxCookingMinutes, setMaxCookingMinutes] = useState<Minutes>(20)
   const [busy, setBusy] = useState(false)
   const initialRecipeRequested = useRef(false)
-  const { toast, show } = useToast()
+  const { toast, show, hide } = useToast()
   const showForm = editing !== null || formName !== null
 
   /** apiFetch with this session's token. A 401 ends the session instead of failing silently. */
@@ -73,6 +82,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
       ])
       setPantry(state.items)
       setConsumed(state.consumedCount)
+      setWaste(state.waste ?? EMPTY_WASTE)
       setShopping(shoppingState.items)
       setStaples(staplesState.names)
       setStatus('ready')
@@ -124,12 +134,13 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
   }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Run a mutation with shared busy/error handling. */
-  async function mutate(action: () => Promise<string | void>) {
+  async function mutate(action: () => Promise<MutationResult>) {
     if (busy) return
     setBusy(true)
     try {
-      const message = await action()
-      if (message) show(message)
+      const result = await action()
+      if (typeof result === 'string') show(result)
+      else if (result) show(result.message, 'success', result.action)
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 401)) show(errorText(error), 'error')
     } finally { setBusy(false) }
@@ -162,20 +173,34 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
     })
   }
 
-  function handleDelete(item: PantryItem) {
-    if (!window.confirm(`${item.name}をリストから削除しますか？`)) return
+  function handleDelete(item: PantryItem, reason: DeleteReason) {
     void mutate(async () => {
-      await call(`/api/pantry/${item.id}`, { method: 'DELETE' })
+      const result = await call<{ item: PantryItem; wasteId: string | null; waste: WasteSummary }>(`/api/pantry/${item.id}?reason=${reason}`, { method: 'DELETE' })
       setPantry((current) => current.filter((row) => row.id !== item.id))
-      return `${item.name}を削除しました`
+      setWaste(result.waste)
+      setDeleting(null)
+      return {
+        message: reason === 'discarded' ? `${item.name}をもったいない記録に残しました` : `${item.name}を削除しました`,
+        action: { label: '元に戻す', onClick: () => undoDelete(result.item, result.wasteId) },
+      }
+    })
+  }
+
+  function undoDelete(item: PantryItem, wasteId: string | null) {
+    hide()
+    void mutate(async () => {
+      const result = await call<{ item: PantryItem; waste: WasteSummary }>('/api/pantry/restore', { method: 'POST', body: { item: toWrite(item), createdAt: item.createdAt, wasteId } })
+      setPantry((current) => [result.item, ...current])
+      setWaste(result.waste)
+      return `${item.name}を元に戻しました`
     })
   }
 
   function resetDemo() {
-    if (!window.confirm('サンプル食材に戻しますか？ 今の登録内容は上書きされます。')) return
+    if (!window.confirm('サンプル食材に戻しますか？ 今の登録内容は上書きされ、使い切り数ともったいない記録もリセットされます。')) return
     void mutate(async () => {
       const state = await call<PantryState>('/api/pantry/reset', { method: 'PUT', body: demoItems.map(toWrite) })
-      setPantry(state.items); setConsumed(state.consumedCount); setFilter('all')
+      setPantry(state.items); setConsumed(state.consumedCount); setWaste(state.waste ?? EMPTY_WASTE); setFilter('all')
       return 'サンプルデータに戻しました'
     })
   }
@@ -183,7 +208,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
   function handleCooked(entries: { id: string; amount: number }[]) {
     void mutate(async () => {
       const state = await call<PantryState>('/api/pantry/consume-batch', { method: 'POST', body: { items: entries } })
-      setPantry(state.items); setConsumed(state.consumedCount); setSelectedRecipe(null)
+      setPantry(state.items); setConsumed(state.consumedCount); setWaste(state.waste ?? EMPTY_WASTE); setSelectedRecipe(null)
       return `ごちそうさま！${entries.length}品の食材を減らしました`
     })
   }
@@ -212,13 +237,13 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
 
   return (
     <div className="app-shell">
-      <Sidebar activeTab={activeTab} onTab={setActiveTab} pantryCount={pantry.length} shoppingCount={openShopping} consumed={consumed} onReset={resetDemo} />
+      <Sidebar activeTab={activeTab} onTab={setActiveTab} pantryCount={pantry.length} shoppingCount={openShopping} consumed={consumed} wasted={waste.monthCount} onReset={resetDemo} />
       <main className="main-content">
         <Topbar activeTab={activeTab} email={email} status={status} pantryCount={pantry.length} consumed={consumed} notificationItems={notificationItems}
           onNotification={(days) => { setActiveTab('pantry'); setFilter(days < 0 ? 'expired' : 'urgent') }} onReset={resetDemo} onLogout={onLogout} />
         {status === 'offline' && <div className="offline-banner" role="alert"><AlertTriangle size={17} /><span>サーバーに接続できません。表示しているのは前回保存した内容で、変更は保存されません。</span><button className="outline-button" onClick={() => void loadAll()}><RefreshCw size={14} />再接続</button></div>}
-        {activeTab === 'pantry' && <PantryView pantry={pantry} loading={status === 'loading'} filter={filter} onFilter={setFilter}
-          onAdd={() => setFormName('')} onEdit={setEditing} onConsume={setConsuming} onDelete={handleDelete} onShowRecipes={() => setActiveTab('recipes')} />}
+        {activeTab === 'pantry' && <PantryView pantry={pantry} loading={status === 'loading'} filter={filter} onFilter={setFilter} waste={waste} consumed={consumed}
+          onAdd={() => setFormName('')} onEdit={setEditing} onConsume={setConsuming} onDelete={setDeleting} onShowRecipes={() => setActiveTab('recipes')} />}
         {activeTab === 'recipes' && <RecipesView recipes={recipes} loading={recipeLoading || status === 'loading'} stale={recipesStale} source={recipeSource} message={recipeMessage}
           budgetYen={budgetYen} onBudget={setBudgetYen} maxMinutes={maxCookingMinutes} onMaxMinutes={setMaxCookingMinutes}
           staples={staples} onSaveStaples={saveStaples} busy={busy} onRefresh={() => void refreshRecipes()} onSelect={setSelectedRecipe} onShowPantry={() => setActiveTab('pantry')} />}
@@ -231,8 +256,9 @@ export function Kitchen({ token, email, onLogout, onSessionExpired }: { token: s
         <footer className="page-footer"><span>© 2026 mottainai kitchen</span><span>{status === 'ready' ? 'SQLiteデータベースに保存中' : status === 'loading' ? '読み込み中…' : 'オフライン（変更は保存されません）'}</span><span>食材を大切に、毎日のごはんを豊かに。</span></footer>
       </main>
 
-      {toast && <div className={`toast ${toast.tone === 'error' ? 'toast-error' : ''}`} role={toast.tone === 'error' ? 'alert' : 'status'}>{toast.tone === 'error' ? <AlertTriangle size={17} /> : <CircleCheck size={17} />}{toast.message}</div>}
+      {toast && <div className={`toast ${toast.tone === 'error' ? 'toast-error' : ''}`} role={toast.tone === 'error' ? 'alert' : 'status'}>{toast.tone === 'error' ? <AlertTriangle size={17} /> : <CircleCheck size={17} />}{toast.message}{toast.action && <button type="button" className="toast-action" onClick={toast.action.onClick}>{toast.action.label}</button>}</div>}
       {showForm && <IngredientModal item={editing} initialName={formName ?? ''} onClose={closeForm} onSave={handleSave} />}
+      {deleting && <DeleteModal item={deleting} onClose={() => setDeleting(null)} onDelete={(reason) => handleDelete(deleting, reason)} />}
       {consuming && <ConsumeModal item={consuming} onClose={() => setConsuming(null)} onConsume={(amount) => handleConsume(consuming, amount)} />}
       {selectedRecipe && <RecipeModal recipe={selectedRecipe} pantry={pantry} staples={staples} busy={busy} onClose={() => setSelectedRecipe(null)} onAddToShopping={addToShopping} onCooked={handleCooked} />}
     </div>

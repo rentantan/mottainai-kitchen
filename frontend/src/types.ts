@@ -39,4 +39,16 @@ export type ShoppingItem = {
   checked: boolean
   createdAt: string
 }
-export type PantryState = { items: PantryItem[]; consumedCount: number; initialized: boolean }
+export type WasteEntry = {
+  id: string
+  name: string
+  quantity: number
+  unit: string
+  category: Category
+  emoji: string
+  expiryDate: string
+  discardedAt: string
+}
+/** Discarded food ("もったいない記録"): recent entries plus all-time / this-month counts. */
+export type WasteSummary = { items: WasteEntry[]; totalCount: number; monthCount: number }
+export type PantryState = { items: PantryItem[]; consumedCount: number; initialized: boolean; waste: WasteSummary }

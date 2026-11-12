@@ -3,11 +3,13 @@ import type { FormEvent } from 'react'
 import { Check, X } from 'lucide-react'
 import type { PantryItem } from '../types'
 import { formatQuantity } from '../utils'
+import { useDismiss } from '../hooks/useDismiss'
 
 /** Ask how much was used: presets (1 unit / half / all) or a custom amount. */
 export function ConsumeModal({ item, onClose, onConsume }: { item: PantryItem; onClose: () => void; onConsume: (amount: number) => void }) {
   const [custom, setCustom] = useState('')
   const [error, setError] = useState('')
+  useDismiss(true, onClose)
   const presets: { label: string; amount: number }[] = []
   if (item.quantity > 1) presets.push({ label: `1${item.unit}`, amount: 1 })
   if (item.quantity > 1 || item.quantity === 1 && !['個', '本', '枚', '丁', '缶', '玉'].includes(item.unit)) presets.push({ label: '半分', amount: item.quantity / 2 })

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, ArrowLeft, Check, ChefHat, Clock3, ListPlus, Plus, ShoppingBasket, Utensils, Wallet, X } from 'lucide-react'
 import type { PantryItem, Recipe } from '../types'
+import { useDismiss } from '../hooks/useDismiss'
 import { daysUntil, expiryText, formatQuantity, guessAmount, isStaple, pantryMatchesFor } from '../utils'
 
 type CookLine = { item: PantryItem; detail: string; checked: boolean; amount: string }
@@ -22,6 +23,7 @@ export function RecipeModal({ recipe, pantry, staples, busy, onClose, onAddToSho
   }), [recipe, pantry, staples])
   const missing = rows.filter((row) => row.status === 'missing').map((row) => row.ingredient)
   const [cookLines, setCookLines] = useState<CookLine[] | null>(null)
+  useDismiss(true, onClose)
 
   function startCooking() {
     const seen = new Set<string>()
