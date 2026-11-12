@@ -71,7 +71,8 @@ class RecipePreferences(BaseModel):
 
 
 class SuggestRequest(BaseModel):
-    pantry: list[PantryInput] = Field(default_factory=list, max_length=200)
+    # The pantry is read from SQLite on the server. A "pantry" field sent by older clients
+    # is ignored (pydantic drops unknown fields).
     preferences: RecipePreferences = Field(default_factory=RecipePreferences)
     # refresh=True: the user asked for different recipes under the same conditions, so skip
     # the cache and avoid the dishes in exclude_recipe_names (the ones currently shown).

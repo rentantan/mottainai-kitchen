@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import threading
 import time
 from datetime import date, datetime
 from typing import Any
@@ -292,6 +293,9 @@ RECIPE_RESPONSE_SCHEMA: dict[str, Any] = {
 # Per-account Gemini call times (in memory; the daily counts live in SQLite).
 _request_history: dict[str, list[float]] = {}
 _last_request_at: dict[str, float] = {}
+# FastAPI runs sync handlers in a thread pool: without a lock, two quick taps can both pass
+# the interval check before either records its call, and both reach Gemini.
+_rate_lock = threading.Lock()
 
 
 def today_japan() -> date:
@@ -353,9 +357,9 @@ def _expiry_context(item: PantryInput, today: date) -> dict[str, Any]:
     }
 
 
-def _build_prompt(request: SuggestRequest, staples: list[str]) -> str:
+def _build_prompt(request: SuggestRequest, pantry: list[PantryInput], staples: list[str]) -> str:
     today = today_japan()
-    pantry_context = [_expiry_context(item, today) for item in request.pantry]
+    pantry_context = [_expiry_context(item, today) for item in pantry]
     usable = [row for row in pantry_context if row["days_until_expiry"] >= 0]
     expired = [row for row in pantry_context if row["days_until_expiry"] < 0]
     prefs = request.preferences
@@ -644,7 +648,8 @@ def _format_fallback(pantry: list[PantryInput], preferences: RecipePreferences, 
 
 
 def _user_rate_limit_message(user_id: str) -> str | None:
-    """Short-term per-account limits (interval and hourly). Read-only: nothing is recorded here."""
+    """Short-term per-account limits (interval and hourly). Read-only: nothing is recorded here.
+    Call with _rate_lock held, together with _record_user_request."""
     now = time.time()
     if now - _last_request_at.get(user_id, 0.0) < MIN_REQUEST_INTERVAL_SECONDS:
         return f"AI提案は{int(MIN_REQUEST_INTERVAL_SECONDS)}秒以上あけて使ってください。少し待ってから再試行してください。"
@@ -663,12 +668,13 @@ def _record_user_request(user_id: str) -> None:
 
 def _forget_user_request(user_id: str) -> None:
     """A failed call does not count toward the hourly limit (the interval still applies)."""
-    history = _request_history.get(user_id)
-    if history:
-        history.pop()
+    with _rate_lock:
+        history = _request_history.get(user_id)
+        if history:
+            history.pop()
 
 
-def _cache_key(payload: SuggestRequest, user_id: str, staples: list[str]) -> str:
+def _cache_key(payload: SuggestRequest, pantry: list[PantryInput], user_id: str, staples: list[str]) -> str:
     """Same pantry + settings on the same Japan date reuse one AI result.
 
     refresh / exclude_recipe_names are deliberately excluded: a refresh overwrites this
@@ -677,7 +683,7 @@ def _cache_key(payload: SuggestRequest, user_id: str, staples: list[str]) -> str
     serializable = {
         "user_id": user_id,
         "pantry": sorted(
-            [item.model_dump(mode="json") for item in payload.pantry],
+            [item.model_dump(mode="json") for item in pantry],
             key=lambda item: (item["name"], item["expiry_date"], item["quantity"], item["unit"]),
         ),
         "staples": sorted(staples),
@@ -745,8 +751,7 @@ def _reserve_daily_gemini_request(user_id: str) -> str | None:
     Cache hits never reach this function.
     """
     today = today_japan().isoformat()
-    with db_connection() as connection:
-        connection.execute("BEGIN IMMEDIATE")
+    with db_connection(immediate=True) as connection:
         row = connection.execute(
             "SELECT request_count FROM gemini_daily_usage WHERE usage_date = ?", (today,)
         ).fetchone()
@@ -787,13 +792,26 @@ def _release_user_daily_request(user_id: str) -> None:
         )
 
 
+def _read_pantry_for_recipes(connection, user_id: str) -> list[PantryInput]:
+    """The pantry as stored in SQLite: the single source of truth for suggestions, so a stale
+    copy in a browser tab (or another device's edits) can never skew matching or the cache."""
+    rows = connection.execute(
+        "SELECT name, quantity, unit, expiry_date, category, frozen FROM pantry_items WHERE user_id = ? "
+        "ORDER BY expiry_date ASC, created_at DESC LIMIT 200", (user_id,)
+    ).fetchall()
+    return [PantryInput(name=row["name"], quantity=row["quantity"], unit=row["unit"],
+                        expiry_date=date.fromisoformat(row["expiry_date"]), category=row["category"],
+                        frozen=bool(row["frozen"])) for row in rows]
+
+
 @router.post("/suggest")
 def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]:
     user = _current_user(request)
     user_id = user["id"]
     with db_connection() as connection:
         staples = _read_staples(connection, user_id)
-    key = _cache_key(payload, user_id, staples)
+        pantry = _read_pantry_for_recipes(connection, user_id)
+    key = _cache_key(payload, pantry, user_id, staples)
 
     # 1) Check SQLite cache first, unless the user explicitly asked for different recipes.
     # This path does not call Gemini and does not consume any quota or app-side allowance.
@@ -802,7 +820,7 @@ def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]
         if cached is not None:
             return cached
 
-    fallback = _format_fallback(payload.pantry, payload.preferences, staples, payload.exclude_recipe_names)
+    fallback = _format_fallback(pantry, payload.preferences, staples, payload.exclude_recipe_names)
 
     def local(message: str) -> dict[str, Any]:
         return {"recipes": fallback, "source": "local", "cached": False, "message": message}
@@ -810,14 +828,16 @@ def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]
     if not GEMINI_API_KEY:
         return local("Gemini APIキーが未設定のため、アプリ内の節約レシピを表示しています。")
 
-    limit_message = _user_rate_limit_message(user_id) or _reserve_daily_gemini_request(user_id)
+    with _rate_lock:
+        limit_message = _user_rate_limit_message(user_id) or _reserve_daily_gemini_request(user_id)
+        if not limit_message:
+            _record_user_request(user_id)
     if limit_message:
         return local(f"{limit_message} アプリ内の節約レシピを表示しています。")
-    _record_user_request(user_id)
 
     try:
-        raw = _gemini_generate(_build_prompt(payload, staples))
-        recipes = _format_gemini_recipes(raw, payload.pantry, staples)
+        raw = _gemini_generate(_build_prompt(payload, pantry, staples))
+        recipes = _format_gemini_recipes(raw, pantry, staples)
         # Enforce user's selected bounds even if the model ignores the prompt.
         recipes = [
             recipe for recipe in recipes

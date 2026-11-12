@@ -29,7 +29,7 @@ def get_pantry(request: Request) -> dict[str, Any]:
 @router.post("")
 def create_pantry_item(payload: PantryItemWrite, request: Request) -> dict[str, Any]:
     user = _current_user(request)
-    with db_connection() as connection:
+    with db_connection(immediate=True) as connection:
         _ensure_user_state(connection, user["id"])
         return _insert_pantry_item(connection, payload, user["id"])
 
@@ -39,7 +39,7 @@ def reset_pantry(request: Request, payload: list[PantryItemWrite] = Body(max_len
                  keep_records: bool = False) -> dict[str, Any]:
     """Replace all pantry items. keep_records=true leaves the use-up count and waste log alone."""
     user = _current_user(request)
-    with db_connection() as connection:
+    with db_connection(immediate=True) as connection:
         _ensure_user_state(connection, user["id"])
         connection.execute("DELETE FROM pantry_items WHERE user_id = ?", (user["id"],))
         connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user["id"],))
@@ -55,7 +55,7 @@ def reset_pantry(request: Request, payload: list[PantryItemWrite] = Body(max_len
 @router.post("/restore")
 def restore_pantry_item(payload: RestoreRequest, request: Request) -> dict[str, Any]:
     user = _current_user(request)
-    with db_connection() as connection:
+    with db_connection(immediate=True) as connection:
         _ensure_user_state(connection, user["id"])
         item = _insert_pantry_item(connection, payload.item, user["id"], payload.createdAt)
         if payload.wasteId:
@@ -67,7 +67,7 @@ def restore_pantry_item(payload: RestoreRequest, request: Request) -> dict[str, 
 def consume_batch(payload: BatchConsumeRequest, request: Request) -> dict[str, Any]:
     """Consume several pantry items at once (e.g. after cooking a recipe). All-or-nothing."""
     user = _current_user(request)
-    with db_connection() as connection:
+    with db_connection(immediate=True) as connection:
         _ensure_user_state(connection, user["id"])
         log_ids = [_consume(connection, user["id"], entry.id, entry.amount)[1] for entry in payload.items]
         return {**_read_pantry_state(connection, user["id"]), "logIds": log_ids}
@@ -77,7 +77,7 @@ def consume_batch(payload: BatchConsumeRequest, request: Request) -> dict[str, A
 def undo_consume(payload: UndoConsumeRequest, request: Request) -> dict[str, Any]:
     """Undo "使った" / "作った！": give the amount back, or bring back an item that was used up. All-or-nothing."""
     user = _current_user(request)
-    with db_connection() as connection:
+    with db_connection(immediate=True) as connection:
         for entry in payload.entries:
             log = connection.execute("SELECT * FROM consume_log WHERE id = ? AND user_id = ?", (entry.logId, user["id"])).fetchone()
             if log is None:
@@ -87,6 +87,11 @@ def undo_consume(payload: UndoConsumeRequest, request: Request) -> dict[str, Any
                 (log["amount"], log["item_id"], user["id"]),
             ).rowcount
             if not restored:
+                # Only an item that "使った" used up (and so deleted) may be brought back. If it was
+                # only partly used, it has since been deleted by the user: re-creating it would
+                # resurrect food they removed (and double-count it if it was logged as waste).
+                if not log["used_up"]:
+                    raise HTTPException(status_code=409, detail="この食材はすでに削除されているため、元に戻せません")
                 if entry.item is None:
                     raise HTTPException(status_code=400, detail="使い切った食材を戻すには食材の情報が必要です")
                 _insert_pantry_item(connection, entry.item, user["id"], entry.createdAt)
@@ -101,7 +106,7 @@ def undo_consume(payload: UndoConsumeRequest, request: Request) -> dict[str, Any
 @router.put("/{item_id}")
 def update_pantry_item(item_id: str, payload: PantryItemWrite, request: Request) -> dict[str, Any]:
     user = _current_user(request)
-    with db_connection() as connection:
+    with db_connection(immediate=True) as connection:
         # purchased_quantity only grows: editing the remaining amount down must not
         # change what the price was paid for.
         result = connection.execute(
@@ -125,7 +130,7 @@ def update_pantry_item(item_id: str, payload: PantryItemWrite, request: Request)
 def delete_pantry_item(item_id: str, request: Request, reason: Literal["removed", "discarded"] = "removed") -> dict[str, Any]:
     """reason=discarded records the item in the waste log ("もったいない記録"); removed just deletes it."""
     user = _current_user(request)
-    with db_connection() as connection:
+    with db_connection(immediate=True) as connection:
         row = connection.execute("SELECT * FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"])).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="食材が見つかりません")
@@ -147,7 +152,7 @@ def delete_pantry_item(item_id: str, request: Request, reason: Literal["removed"
 def consume_pantry_item(item_id: str, request: Request, payload: ConsumeRequest | None = None) -> dict[str, Any]:
     user = _current_user(request)
     amount = payload.amount if payload and payload.amount is not None else 1.0
-    with db_connection() as connection:
+    with db_connection(immediate=True) as connection:
         updated_item, log_id = _consume(connection, user["id"], item_id, amount)
         state = connection.execute("SELECT consumed_count FROM app_state WHERE user_id = ?", (user["id"],)).fetchone()
         return {"item": updated_item, "consumedCount": int(state["consumed_count"]) if state else 0,

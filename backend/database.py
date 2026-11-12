@@ -18,14 +18,22 @@ from config import DATABASE_PATH
 from models import PantryItemWrite
 
 @contextmanager
-def db_connection():
-    """Open a short-lived SQLite connection and commit successful writes."""
+def db_connection(immediate: bool = False):
+    """Open a short-lived SQLite connection and commit successful writes.
+
+    immediate=True takes the write lock up front (BEGIN IMMEDIATE). Use it for
+    read-then-write handlers (e.g. "使った": read the quantity, then store the new one) so
+    two concurrent requests (two tabs, phone + PC) cannot both read the old value and
+    overwrite each other's change.
+    """
     db_path = Path(DATABASE_PATH)
     if str(DATABASE_PATH) != ":memory:":
         db_path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(DATABASE_PATH), timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    if immediate:
+        connection.execute("BEGIN IMMEDIATE")
     try:
         yield connection
         connection.commit()

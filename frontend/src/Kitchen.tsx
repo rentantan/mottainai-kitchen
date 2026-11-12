@@ -130,8 +130,8 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
     try {
       const data = await call<{ recipes?: Recipe[]; source?: 'gemini' | 'local'; message?: string }>('/api/recipes/suggest', {
         method: 'POST',
+        // The server suggests from the pantry stored in SQLite, so the fridge is not sent here.
         body: {
-          pantry: pantry.map(({ name, quantity, unit, expiryDate, category, frozen }) => ({ name, quantity, unit, expiry_date: expiryDate, category, frozen: frozen ?? false })),
           preferences: { budget_yen: budgetYen, max_minutes: maxCookingMinutes, equipment },
           refresh: another,
           exclude_recipe_names: shownNames,

@@ -8,7 +8,7 @@ from database import db_connection
 from recipes import today_japan
 
 PANTRY = [{"name": "卵", "quantity": 6, "unit": "個", "category": "乳製品・卵",
-           "expiry_date": (today_japan() + timedelta(days=2)).isoformat()}]
+           "expiryDate": (today_japan() + timedelta(days=2)).isoformat()}]
 
 
 def _gemini_recipe(name):
@@ -44,8 +44,33 @@ def gemini(monkeypatch):
 
 
 def _suggest(client, headers, **extra):
-    body = {"pantry": PANTRY, "preferences": {"budget_yen": 500, "max_minutes": 20}, **extra}
+    """Suggest from the user's stored pantry (seeded with PANTRY on first use)."""
+    if not client.get("/api/pantry", headers=headers).json()["items"]:
+        for item in PANTRY:
+            client.post("/api/pantry", json=item, headers=headers)
+    body = {"preferences": {"budget_yen": 500, "max_minutes": 20}, **extra}
     return client.post("/api/recipes/suggest", json=body, headers=headers).json()
+
+
+def test_suggest_uses_stored_pantry_not_client_copy(client, make_user, gemini):
+    """The server's pantry is the source of truth: a pantry list sent by the client is ignored."""
+    _, headers = make_user()
+    _suggest(client, headers)
+    assert "卵" in gemini["prompts"][0]
+    body = {"pantry": [{"name": "キャビア", "quantity": 1, "unit": "個", "category": "その他",
+                        "expiry_date": today_japan().isoformat()}],
+            "preferences": {"budget_yen": 500, "max_minutes": 20}, "refresh": True}
+    client.post("/api/recipes/suggest", json=body, headers=headers)
+    assert "キャビア" not in gemini["prompts"][1] and "卵" in gemini["prompts"][1]
+
+
+def test_pantry_change_invalidates_cache(client, make_user, gemini):
+    _, headers = make_user()
+    _suggest(client, headers)
+    item = client.get("/api/pantry", headers=headers).json()["items"][0]
+    client.post(f"/api/pantry/{item['id']}/consume", json={"amount": 1}, headers=headers)
+    assert _suggest(client, headers)["cached"] is False
+    assert len(gemini["prompts"]) == 2
 
 
 def test_same_conditions_reuse_cache(client, make_user, gemini):

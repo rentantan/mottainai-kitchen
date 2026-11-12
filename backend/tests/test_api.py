@@ -51,11 +51,9 @@ def test_consume_reduces_then_removes_item(client, make_user):
 
 def test_fallback_recipes_use_expiring_items_with_alias_names(client, make_user):
     _, headers = make_user()
-    pantry = [
-        {"name": "鶏もも肉", "quantity": 250, "unit": "g", "category": "肉・魚", "expiry_date": (today_japan() + timedelta(days=0)).isoformat()},
-        {"name": "ご飯", "quantity": 2, "unit": "杯", "category": "主食・麺", "expiry_date": (today_japan() + timedelta(days=5)).isoformat()},
-    ]
-    data = client.post("/api/recipes/suggest", json={"pantry": pantry, "preferences": {"budget_yen": 500, "max_minutes": 20}},
+    client.post("/api/pantry", json=_item("鶏もも肉", 0, quantity=250, unit="g", category="肉・魚"), headers=headers)
+    client.post("/api/pantry", json=_item("ご飯", 5, quantity=2, unit="杯", category="主食・麺"), headers=headers)
+    data = client.post("/api/recipes/suggest", json={"preferences": {"budget_yen": 500, "max_minutes": 20}},
                        headers=headers).json()
     assert data["source"] == "local"
     top = data["recipes"][0]
@@ -157,12 +155,11 @@ def test_microwave_mode_only_returns_stove_free_recipes(client, make_user):
 
 
 def test_frozen_items_are_flagged_in_prompt():
-    from models import SuggestRequest
+    from models import PantryInput, SuggestRequest
     from recipes import _build_prompt
-    request = SuggestRequest(pantry=[{"name": "ごはん", "quantity": 2, "unit": "杯", "category": "主食・麺",
-                                      "expiry_date": (today_japan() + timedelta(days=30)).isoformat(), "frozen": True}],
-                             preferences={"equipment": "microwave"})
-    prompt = _build_prompt(request, [])
+    pantry = [PantryInput(name="ごはん", quantity=2, unit="杯", category="主食・麺",
+                          expiry_date=today_japan() + timedelta(days=30), frozen=True)]
+    prompt = _build_prompt(SuggestRequest(preferences={"equipment": "microwave"}), pantry, [])
     assert "冷凍保存中" in prompt and "電子レンジ（と電気ケトル・炊飯器）だけ" in prompt
 
 
@@ -274,3 +271,30 @@ def test_relative_database_path_is_resolved_from_backend_dir(monkeypatch):
     assert config._database_path() == str(Path(config.__file__).resolve().parent / "data" / "x.db")
     monkeypatch.setenv("DATABASE_PATH", "/tmp/abs.db")
     assert config._database_path() == "/tmp/abs.db"
+
+
+def test_undo_consume_does_not_resurrect_deleted_item(client, make_user):
+    """Partly used, then deleted: undoing the old "使った" must not bring the item back."""
+    _, headers = make_user()
+    item = client.post("/api/pantry", json=_item("卵", 3, quantity=4), headers=headers).json()
+    log_id = client.post(f"/api/pantry/{item['id']}/consume", json={"amount": 1}, headers=headers).json()["logId"]
+    client.delete(f"/api/pantry/{item['id']}?reason=discarded", headers=headers)
+    before = {k: v for k, v in item.items() if k not in ("id", "createdAt")}
+    response = client.post("/api/pantry/undo-consume", json={"entries": [{"logId": log_id, "item": before}]}, headers=headers)
+    assert response.status_code == 409
+    assert client.get("/api/pantry", headers=headers).json()["items"] == []
+
+
+
+def test_concurrent_consumes_do_not_lose_updates(client, make_user):
+    """Two devices pressing "使った" at the same time must both be counted."""
+    from concurrent.futures import ThreadPoolExecutor
+    _, headers = make_user()
+    item = client.post("/api/pantry", json=_item("卵", 3, quantity=10), headers=headers).json()
+
+    def use_one(_):
+        return client.post(f"/api/pantry/{item['id']}/consume", json={"amount": 1}, headers=headers).status_code
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert set(pool.map(use_one, range(8))) == {200}
+    assert client.get("/api/pantry", headers=headers).json()["items"][0]["quantity"] == 2

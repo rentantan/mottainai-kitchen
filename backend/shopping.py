@@ -43,7 +43,8 @@ def add_shopping(payload: ShoppingItemCreate, request: Request) -> dict[str, Any
     other spellings of the same food (ネギ / ねぎ / 長ねぎ, 醤油 / しょうゆ)."""
     user = _current_user(request)
     names = _clean_names(payload.names, 60)
-    with db_connection() as connection:
+    # Immediate: the duplicate check and the 200-item cap must see the rows this request inserts.
+    with db_connection(immediate=True) as connection:
         existing = {
             row["name"] for row in connection.execute(
                 "SELECT name FROM shopping_items WHERE user_id = ? AND checked = 0", (user["id"],)
