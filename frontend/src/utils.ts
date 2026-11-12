@@ -1,4 +1,4 @@
-import type { PantryItem, Recipe } from './types'
+import type { PantryItem, Recipe, RecipeBase, SavedRecipe } from './types'
 import { STORAGE_KEY, fallbackRecipes } from './data'
 import type { Equipment } from './data'
 
@@ -144,7 +144,7 @@ export function guessAmount(detail: string, unit: string): number | null {
   return null
 }
 
-export function scoreRecipe(recipe: typeof fallbackRecipes[number], pantry: PantryItem[], staples: string[]): Recipe {
+export function scoreRecipe(recipe: RecipeBase, pantry: PantryItem[], staples: string[]): Recipe {
   const usablePantry = pantry.filter((item) => daysUntil(item.expiryDate) >= 0)
   const matched = recipe.ingredients.filter((ingredient) => usablePantry.some((item) => ingredientMatches(ingredient, item)) || isStaple(ingredient, staples))
   const matchedItems = usablePantry.filter((item) => matched.some((ingredient) => ingredientMatches(ingredient, item)))
@@ -158,4 +158,29 @@ export function scoreRecipe(recipe: typeof fallbackRecipes[number], pantry: Pant
 }
 export function getFallbackSuggestions(pantry: PantryItem[], staples: string[], budgetYen = 500, maxMinutes = 20, equipment: Equipment = 'any'): Recipe[] {
   return fallbackRecipes.filter((recipe) => (recipe.estimatedCostYen ?? 9999) <= budgetYen && recipe.minutes <= maxMinutes && (equipment === 'any' || recipe.microwaveOnly)).map((recipe) => scoreRecipe(recipe, pantry, staples)).sort((a, b) => (a.nearestExpiryDays ?? 999) - (b.nearestExpiryDays ?? 999) || (b.expiryPriorityScore ?? 0) - (a.expiryPriorityScore ?? 0) || b.usesExpiring - a.usesExpiring || b.matchPercent - a.matchPercent || (a.estimatedCostYen ?? 9999) - (b.estimatedCostYen ?? 9999)).slice(0, 3)
+}
+
+/** The fields of a recipe worth saving; the pantry-dependent ones are recomputed when shown. */
+export function toSavedPayload(recipe: Recipe | RecipeBase) {
+  const { name, description, minutes, difficulty, emoji, ingredients, ingredientDetails, steps, estimatedCostYen, microwaveOnly, source } = recipe
+  return { name, description, minutes, difficulty, emoji, ingredients, ingredientDetails: ingredientDetails ?? [], steps, estimatedCostYen: estimatedCostYen ?? null, microwaveOnly: microwaveOnly ?? false, source: source ?? '' }
+}
+
+/** Same dish? Saved recipes are keyed by name (the backend replaces a re-saved name). */
+export function findSaved(recipe: { name: string }, saved: SavedRecipe[]) {
+  const name = recipe.name.trim()
+  return saved.find((entry) => entry.recipe.name === name)
+}
+
+/**
+ * Saved recipes matched against the current fridge: ones that use soon-to-expire food first,
+ * then the ones needing the fewest extra purchases, then the most recently saved.
+ */
+export function rankSavedRecipes(saved: SavedRecipe[], pantry: PantryItem[], staples: string[]): Recipe[] {
+  return saved
+    .filter((entry) => entry.recipe.ingredients?.length)
+    .map((entry, index) => ({ index, recipe: scoreRecipe({ ...entry.recipe, id: `saved-${entry.id}` }, pantry, staples) }))
+    .sort((a, b) => (b.recipe.expiryPriorityScore ?? 0) - (a.recipe.expiryPriorityScore ?? 0)
+      || a.recipe.missingIngredients.length - b.recipe.missingIngredients.length || a.index - b.index)
+    .map(({ recipe }) => recipe)
 }

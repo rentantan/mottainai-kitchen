@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { PantryItem } from './types'
+import type { PantryItem, SavedRecipe } from './types'
 import { dateOffset } from './data'
-import { daysUntil, expiryClass, expiryText, formatQuantity, getFallbackSuggestions, guessAmount, nameMatches, normalize, pantryMatchesFor } from './utils'
+import { daysUntil, expiryClass, expiryText, formatQuantity, getFallbackSuggestions, guessAmount, nameMatches, normalize, pantryMatchesFor, findSaved, rankSavedRecipes, toSavedPayload } from './utils'
 
 const item = (name: string, days: number, extra: Partial<PantryItem> = {}): PantryItem => ({
   id: name, name, quantity: 1, unit: '個', expiryDate: dateOffset(days), category: 'その他', emoji: '🛒', note: '', createdAt: '', ...extra,
@@ -94,5 +94,31 @@ describe('getFallbackSuggestions', () => {
   it('never counts expired items as available', () => {
     const [top] = getFallbackSuggestions([item('鶏もも肉', -1, { unit: 'g', quantity: 200 })], [], 500, 20)
     expect(top.matchedIngredients).not.toContain('鶏肉')
+  })
+})
+
+describe('saved recipes', () => {
+  const saved = (id: string, name: string, ingredients: string[]): SavedRecipe => ({
+    id, savedAt: '', recipe: { id: 'x', name, description: '', minutes: 10, difficulty: 'かんたん', emoji: '🍳', ingredients, steps: [] },
+  })
+  const list = [saved('a', '豚キャベツ炒め', ['豚肉', 'キャベツ']), saved('b', '卵かけごはん', ['ごはん', '卵', 'しょうゆ']), saved('c', '親子丼', ['鶏肉', '卵', 'ごはん'])]
+
+  it('re-matches against the current fridge and puts recipes using expiring food first', () => {
+    const ranked = rankSavedRecipes(list, [item('卵', 1), item('ご飯', 20), item('鶏もも肉', 0)], ['醤油'])
+    expect(ranked.map((r) => r.name)).toEqual(['親子丼', '卵かけごはん', '豚キャベツ炒め'])
+    expect(ranked[1].missingIngredients).toEqual([])
+    expect(ranked[2].matchPercent).toBe(0)
+    expect(ranked[0].id).toBe('saved-c')
+  })
+
+  it('keeps saved order when nothing in the fridge helps', () => {
+    expect(rankSavedRecipes(list, [], []).map((r) => r.name)).toEqual(['豚キャベツ炒め', '卵かけごはん', '親子丼'])
+  })
+
+  it('finds a saved recipe by name and drops pantry-dependent fields when saving', () => {
+    expect(findSaved({ name: ' 親子丼 ' }, list)?.id).toBe('c')
+    expect(findSaved({ name: '牛丼' }, list)).toBeUndefined()
+    const [scored] = rankSavedRecipes(list.slice(0, 1), [], [])
+    expect(Object.keys(toSavedPayload(scored))).not.toContain('matchedIngredients')
   })
 })

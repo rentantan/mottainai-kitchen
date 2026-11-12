@@ -11,6 +11,7 @@ from config import APP_VERSION, GEMINI_API_KEY, GEMINI_MODEL
 from database import init_database
 from pantry import router as pantry_router
 from recipes import router as recipes_router
+from saved_recipes import router as saved_recipes_router
 from shopping import router as shopping_router
 
 app = FastAPI(
@@ -32,6 +33,7 @@ init_database()
 app.include_router(auth_router)
 app.include_router(pantry_router)
 app.include_router(recipes_router)
+app.include_router(saved_recipes_router)
 app.include_router(shopping_router)
 
 
