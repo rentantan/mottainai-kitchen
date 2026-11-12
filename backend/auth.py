@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
 
-from database import db_connection, _current_user, _password_hash, _token_hash, _verify_password, _ensure_user_state
+from database import CurrentUser, db_connection, _password_hash, _token_hash, _verify_password, _ensure_user_state
 from models import AccountDelete, AuthCredentials, AuthSession, PasswordChange
 
 router = APIRouter(prefix="/api/auth")
@@ -133,8 +133,7 @@ def _require_password(user_id: str, password: str) -> None:
 
 
 @router.get("/me", response_model=AuthSession)
-def get_current_session(request: Request) -> dict[str, str]:
-    user = _current_user(request)
+def get_current_session(user: CurrentUser) -> dict[str, str]:
     return {"token": "", "email": user["email"]}
 
 
@@ -148,9 +147,8 @@ def logout(request: Request) -> dict[str, bool]:
 
 
 @router.post("/logout-others")
-def logout_other_devices(request: Request) -> dict[str, int]:
+def logout_other_devices(user: CurrentUser, request: Request) -> dict[str, int]:
     """End every session of this account except the one making the request (lost phone, shared PC)."""
-    user = _current_user(request)
     with db_connection() as connection:
         removed = connection.execute(
             "DELETE FROM auth_sessions WHERE user_id = ? AND token_hash != ?", (user["id"], _token_hash(_bearer_token(request)))
@@ -159,9 +157,8 @@ def logout_other_devices(request: Request) -> dict[str, int]:
 
 
 @router.post("/password")
-def change_password(payload: PasswordChange, request: Request) -> dict[str, bool]:
+def change_password(payload: PasswordChange, user: CurrentUser, request: Request) -> dict[str, bool]:
     """Change the password. Other devices are logged out; this one stays logged in."""
-    user = _current_user(request)
     _require_password(user["id"], payload.currentPassword)
     with db_connection() as connection:
         connection.execute("UPDATE users SET password_hash = ? WHERE id = ?", (_password_hash(payload.newPassword), user["id"]))
@@ -178,9 +175,8 @@ _USER_TABLES = ("pantry_items", "app_state", "recipe_suggestion_cache", "shoppin
 
 
 @router.delete("/account")
-def delete_account(payload: AccountDelete, request: Request) -> dict[str, bool]:
+def delete_account(payload: AccountDelete, user: CurrentUser) -> dict[str, bool]:
     """Delete the account and all of its data. Requires the password."""
-    user = _current_user(request)
     _require_password(user["id"], payload.password)
     with db_connection() as connection:
         for table in _USER_TABLES:

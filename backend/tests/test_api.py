@@ -298,3 +298,14 @@ def test_concurrent_consumes_do_not_lose_updates(client, make_user):
     with ThreadPoolExecutor(max_workers=8) as pool:
         assert set(pool.map(use_one, range(8))) == {200}
     assert client.get("/api/pantry", headers=headers).json()["items"][0]["quantity"] == 2
+
+
+def test_login_required_messages_and_docs(client):
+    missing = client.get("/api/pantry")
+    assert missing.status_code == 401 and missing.json()["detail"] == "ログインが必要です"
+    wrong = client.get("/api/pantry", headers={"Authorization": "Bearer not-a-token"})
+    assert wrong.status_code == 401 and wrong.json()["detail"] == "ログインの有効期限が切れています"
+    # Every endpoint that needs a login is marked as such in the OpenAPI docs.
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "security" in paths["/api/pantry"]["get"] and "security" in paths["/api/recipes/suggest"]["post"]
+    assert "security" not in paths["/api/auth/login"]["post"]

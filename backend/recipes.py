@@ -11,12 +11,12 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 
 from config import (CACHE_SECONDS, GEMINI_API_KEY, GEMINI_MODEL, GEMINI_TIMEOUT_SECONDS, GEMINI_TOTAL_DEADLINE_SECONDS,
                     MAX_REQUESTS_PER_DAY, MAX_REQUESTS_PER_DAY_PER_USER, MAX_REQUESTS_PER_HOUR_PER_USER,
                     MIN_REQUEST_INTERVAL_SECONDS, PROMPT_VERSION)
-from database import _current_user, _read_staples, db_connection
+from database import CurrentUser, _read_staples, db_connection
 from ingredients import matches_name
 from models import PantryInput, RecipePreferences, SuggestRequest
 
@@ -805,8 +805,7 @@ def _read_pantry_for_recipes(connection, user_id: str) -> list[PantryInput]:
 
 
 @router.post("/suggest")
-def suggest_recipes(payload: SuggestRequest, request: Request) -> dict[str, Any]:
-    user = _current_user(request)
+def suggest_recipes(payload: SuggestRequest, user: CurrentUser) -> dict[str, Any]:
     user_id = user["id"]
     with db_connection() as connection:
         staples = _read_staples(connection, user_id)

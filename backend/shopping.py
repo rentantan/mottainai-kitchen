@@ -5,9 +5,9 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 
-from database import _current_user, _read_staples, db_connection
+from database import CurrentUser, _read_staples, db_connection
 from ingredients import matches_name
 from models import ShoppingItemCreate, ShoppingItemUpdate, StaplesWrite
 
@@ -31,17 +31,15 @@ def _read_shopping(connection, user_id: str) -> list[dict[str, Any]]:
 
 
 @router.get("/shopping")
-def list_shopping(request: Request) -> dict[str, Any]:
-    user = _current_user(request)
+def list_shopping(user: CurrentUser) -> dict[str, Any]:
     with db_connection() as connection:
         return {"items": _read_shopping(connection, user["id"])}
 
 
 @router.post("/shopping")
-def add_shopping(payload: ShoppingItemCreate, request: Request) -> dict[str, Any]:
+def add_shopping(payload: ShoppingItemCreate, user: CurrentUser) -> dict[str, Any]:
     """Add names to the list. Names already on the list (unchecked) are skipped, including
     other spellings of the same food (ネギ / ねぎ / 長ねぎ, 醤油 / しょうゆ)."""
-    user = _current_user(request)
     names = _clean_names(payload.names, 60)
     # Immediate: the duplicate check and the 200-item cap must see the rows this request inserts.
     with db_connection(immediate=True) as connection:
@@ -67,8 +65,7 @@ def add_shopping(payload: ShoppingItemCreate, request: Request) -> dict[str, Any
 
 
 @router.patch("/shopping/{item_id}")
-def update_shopping(item_id: str, payload: ShoppingItemUpdate, request: Request) -> dict[str, Any]:
-    user = _current_user(request)
+def update_shopping(item_id: str, payload: ShoppingItemUpdate, user: CurrentUser) -> dict[str, Any]:
     with db_connection() as connection:
         result = connection.execute(
             "UPDATE shopping_items SET checked = ? WHERE id = ? AND user_id = ?",
@@ -80,31 +77,27 @@ def update_shopping(item_id: str, payload: ShoppingItemUpdate, request: Request)
 
 
 @router.delete("/shopping/checked")
-def clear_checked_shopping(request: Request) -> dict[str, Any]:
-    user = _current_user(request)
+def clear_checked_shopping(user: CurrentUser) -> dict[str, Any]:
     with db_connection() as connection:
         connection.execute("DELETE FROM shopping_items WHERE user_id = ? AND checked = 1", (user["id"],))
         return {"items": _read_shopping(connection, user["id"])}
 
 
 @router.delete("/shopping/{item_id}")
-def delete_shopping(item_id: str, request: Request) -> dict[str, Any]:
-    user = _current_user(request)
+def delete_shopping(item_id: str, user: CurrentUser) -> dict[str, Any]:
     with db_connection() as connection:
         connection.execute("DELETE FROM shopping_items WHERE id = ? AND user_id = ?", (item_id, user["id"]))
         return {"items": _read_shopping(connection, user["id"])}
 
 
 @router.get("/staples")
-def get_staples(request: Request) -> dict[str, list[str]]:
-    user = _current_user(request)
+def get_staples(user: CurrentUser) -> dict[str, list[str]]:
     with db_connection() as connection:
         return {"names": _read_staples(connection, user["id"])}
 
 
 @router.put("/staples")
-def put_staples(payload: StaplesWrite, request: Request) -> dict[str, list[str]]:
-    user = _current_user(request)
+def put_staples(payload: StaplesWrite, user: CurrentUser) -> dict[str, list[str]]:
     names = _clean_names(payload.names, 30)
     with db_connection() as connection:
         connection.execute("DELETE FROM pantry_staples WHERE user_id = ?", (user["id"],))

@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CircleCheck, RefreshCw } from 'lucide-react'
 import type { PantryItem, PantryState, Recipe, ShoppingItem, WasteSummary } from './types'
 import { FREEZER_DAYS, dateOffset, demoItems } from './data'
-import type { Equipment } from './data'
-import { ApiError, FRONTEND_TIMEOUT_MS, apiFetch } from './api'
-import { daysUntil, formatQuantity, getFallbackSuggestions, loadCachedPantry, saveCachedPantry } from './utils'
+import { ApiError, apiFetch } from './api'
+import { daysUntil, formatQuantity, loadCachedPantry, saveCachedPantry } from './utils'
 import { useToast } from './hooks/useToast'
 import { useShopping } from './hooks/useShopping'
+import { useRecipes } from './hooks/useRecipes'
 import type { ToastAction } from './hooks/useToast'
 import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
@@ -24,8 +24,6 @@ export type Tab = 'pantry' | 'recipes' | 'shopping'
 export type PantryFilter = 'all' | 'urgent' | 'expired'
 /** loading: first fetch in progress / ready: in sync with SQLite / offline: showing the last cached snapshot. */
 export type DataStatus = 'loading' | 'ready' | 'offline'
-type Budget = 300 | 500 | 700
-type Minutes = 10 | 20 | 30
 
 const EMPTY_WASTE: WasteSummary = { items: [], totalCount: 0, monthCount: 0 }
 /** A mutation may return a toast message, optionally with an action button such as "元に戻す". */
@@ -47,19 +45,10 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
   const [consuming, setConsuming] = useState<PantryItem | null>(null)
   const [deleting, setDeleting] = useState<PantryItem | null>(null)
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null)
-  const [recipes, setRecipes] = useState<Recipe[]>([])
-  const [recipeLoading, setRecipeLoading] = useState(false)
-  const [recipeSource, setRecipeSource] = useState<'gemini' | 'local'>('local')
-  const [recipeMessage, setRecipeMessage] = useState('')
-  const [requestedKey, setRequestedKey] = useState('')
-  const [budgetYen, setBudgetYen] = useState<Budget>(500)
-  const [maxCookingMinutes, setMaxCookingMinutes] = useState<Minutes>(20)
-  const [equipment, setEquipment] = useState<Equipment>('any')
   const [busy, setBusy] = useState(false)
   // A ref as well: undo buttons in toasts call mutate() from an older render, where `busy` is stale.
   const busyRef = useRef(false)
   const [showAccount, setShowAccount] = useState(false)
-  const initialRecipeRequested = useRef(false)
   const { toast, show, hide } = useToast()
   const shoppingList = useShopping(call, show)
   const shopping = shoppingList.items
@@ -118,52 +107,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
 
   useEffect(() => { void loadAll() }, []) // eslint-disable-line react-hooks/exhaustive-deps -- once per mount (Kitchen remounts per session)
   useEffect(() => { if (status === 'ready') saveCachedPantry(email, pantry) }, [pantry, status, email])
-
-  const recipeKey = useMemo(() => JSON.stringify({
-    p: pantry.map((item) => [item.name, item.quantity, item.expiryDate, item.frozen ?? false]).sort(), s: [...staples].sort(), b: budgetYen, m: maxCookingMinutes, e: equipment,
-  }), [pantry, staples, budgetYen, maxCookingMinutes, equipment])
-  const recipesStale = !recipeLoading && requestedKey !== '' && requestedKey !== recipeKey
-
-  /** another=true: same conditions, but the user wants different dishes (skips the server cache). */
-  async function refreshRecipes(another = false) {
-    const shownNames = another ? recipes.map((recipe) => recipe.name) : []
-    setRecipeLoading(true)
-    setRequestedKey(recipeKey)
-    try {
-      const data = await call<{ recipes?: Recipe[]; source?: 'gemini' | 'local'; message?: string }>('/api/recipes/suggest', {
-        method: 'POST',
-        // The server suggests from the pantry stored in SQLite, so the fridge is not sent here.
-        body: {
-          preferences: { budget_yen: budgetYen, max_minutes: maxCookingMinutes, equipment },
-          refresh: another,
-          exclude_recipe_names: shownNames,
-        },
-        timeoutMs: FRONTEND_TIMEOUT_MS,
-      })
-      const received = Array.isArray(data.recipes) ? data.recipes : []
-      setRecipes(received.length ? received : getFallbackSuggestions(pantry, staples, budgetYen, maxCookingMinutes, equipment))
-      setRecipeSource(data.source === 'gemini' ? 'gemini' : 'local')
-      setRecipeMessage(data.message || '')
-    } catch (error) {
-      setRecipes(getFallbackSuggestions(pantry, staples, budgetYen, maxCookingMinutes, equipment))
-      setRecipeSource('local')
-      setRecipeMessage(`${errorText(error)} アプリ内の節約レシピを表示しています。`)
-    } finally { setRecipeLoading(false) }
-  }
-
-  useEffect(() => {
-    if (status === 'loading' || initialRecipeRequested.current) return
-    // Suggest once on start. Calling Gemini on every pantry/settings change would burn the free quota,
-    // so afterwards suggestions only run from the button.
-    initialRecipeRequested.current = true
-    if (status === 'ready' && pantry.length === 0) {
-      // Nothing registered yet: don't spend AI quota on an empty fridge.
-      setRecipes(getFallbackSuggestions(pantry, staples, budgetYen, maxCookingMinutes, equipment))
-      setRecipeMessage('食材を登録すると、冷蔵庫の中身と期限に合わせてAIがレシピを提案します。いまはアプリ内の節約レシピを表示しています。')
-      setRequestedKey(recipeKey)
-    } else if (status === 'ready') void refreshRecipes()
-    else { setRecipes(getFallbackSuggestions(pantry, staples, budgetYen, maxCookingMinutes, equipment)); setRecipeMessage('サーバーに接続できないため、アプリ内の節約レシピを表示しています。') }
-  }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
+  const suggestions = useRecipes({ call, status, pantry, staples })
 
   /** Run a mutation with shared busy/error handling. */
   async function mutate(action: () => Promise<MutationResult>) {
@@ -323,9 +267,9 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
         {activeTab === 'pantry' && <PantryView pantry={pantry} loading={status === 'loading'} filter={filter} onFilter={setFilter} waste={waste} consumed={consumed}
           onAdd={() => setFormName('')} onEdit={setEditing} onConsume={setConsuming} onDelete={setDeleting} onShowRecipes={() => setActiveTab('recipes')}
           onFreeze={handleFreeze} onLoadSample={resetDemo} onClearAll={clearAll} />}
-        {activeTab === 'recipes' && <RecipesView recipes={recipes} loading={recipeLoading || status === 'loading'} stale={recipesStale} source={recipeSource} message={recipeMessage}
-          budgetYen={budgetYen} onBudget={setBudgetYen} maxMinutes={maxCookingMinutes} onMaxMinutes={setMaxCookingMinutes} equipment={equipment} onEquipment={setEquipment}
-          staples={staples} onSaveStaples={saveStaples} busy={busy} onRefresh={() => void refreshRecipes(!recipesStale)} onSelect={setSelectedRecipe} onShowPantry={() => setActiveTab('pantry')} />}
+        {activeTab === 'recipes' && <RecipesView recipes={suggestions.recipes} loading={suggestions.loading || status === 'loading'} stale={suggestions.stale} source={suggestions.source} message={suggestions.message}
+          budgetYen={suggestions.budgetYen} onBudget={suggestions.setBudgetYen} maxMinutes={suggestions.maxMinutes} onMaxMinutes={suggestions.setMaxMinutes} equipment={suggestions.equipment} onEquipment={suggestions.setEquipment}
+          staples={staples} onSaveStaples={saveStaples} busy={busy} onRefresh={() => void suggestions.refresh(!suggestions.stale)} onSelect={setSelectedRecipe} onShowPantry={() => setActiveTab('pantry')} />}
         {activeTab === 'shopping' && <ShoppingView items={shopping} busy={busy}
           onAdd={(name) => addToShopping([name])}
           onToggle={shoppingList.toggle} onDelete={shoppingList.remove} onClearChecked={shoppingList.clearChecked}

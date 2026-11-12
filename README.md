@@ -212,6 +212,8 @@ npm run dev
 
 すべてのデータはバックエンドのSQLiteファイル `backend/data/mottainai.db` に保存します。1ファイルで動くため、DBサーバーや外部サービスへの登録は不要です。
 
+テーブル構成はバージョン管理しています（SQLiteの `PRAGMA user_version`）。起動時に `backend/database.py` の `MIGRATIONS` のうち未適用のものだけを順に実行し、途中で失敗したらその変更はすべて取り消します。構成を変えるときは `MIGRATIONS` の末尾に関数を追加してください（既存の関数は書き換えない）。アプリより新しいバージョンのDBでは起動を止めます。
+
 | テーブル | 内容 |
 | --- | --- |
 | `users` / `auth_sessions` | アカウント（パスワードはPBKDF2でハッシュ化）とログインセッション |

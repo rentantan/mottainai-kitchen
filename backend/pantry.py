@@ -6,9 +6,9 @@ from datetime import datetime
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException
 
-from database import (_current_user, _db_item_to_api, _ensure_user_state, _insert_pantry_item,
+from database import (CurrentUser, _db_item_to_api, _ensure_user_state, _insert_pantry_item,
                       _read_pantry_state, _read_waste, db_connection, item_value_yen)
 from models import BatchConsumeRequest, ConsumeRequest, PantryItemWrite, RestoreRequest, UndoConsumeRequest
 
@@ -19,27 +19,24 @@ _EPSILON = 1e-6
 
 
 @router.get("")
-def get_pantry(request: Request) -> dict[str, Any]:
-    user = _current_user(request)
+def get_pantry(user: CurrentUser) -> dict[str, Any]:
     with db_connection() as connection:
         _ensure_user_state(connection, user["id"])
         return _read_pantry_state(connection, user["id"])
 
 
 @router.post("")
-def create_pantry_item(payload: PantryItemWrite, request: Request) -> dict[str, Any]:
-    user = _current_user(request)
+def create_pantry_item(payload: PantryItemWrite, user: CurrentUser) -> dict[str, Any]:
     with db_connection(immediate=True) as connection:
         _ensure_user_state(connection, user["id"])
         return _insert_pantry_item(connection, payload, user["id"])
 
 
 @router.put("/reset")
-def reset_pantry(request: Request, payload: list[PantryItemWrite] = Body(max_length=200),
+def reset_pantry(user: CurrentUser, payload: list[PantryItemWrite] = Body(max_length=200),
                  reset_records: bool = False) -> dict[str, Any]:
     """Replace all pantry items. The use-up count and waste log are kept unless
     reset_records=true: wiping a user's history must be asked for explicitly."""
-    user = _current_user(request)
     with db_connection(immediate=True) as connection:
         _ensure_user_state(connection, user["id"])
         connection.execute("DELETE FROM pantry_items WHERE user_id = ?", (user["id"],))
@@ -54,8 +51,7 @@ def reset_pantry(request: Request, payload: list[PantryItemWrite] = Body(max_len
 
 
 @router.post("/restore")
-def restore_pantry_item(payload: RestoreRequest, request: Request) -> dict[str, Any]:
-    user = _current_user(request)
+def restore_pantry_item(payload: RestoreRequest, user: CurrentUser) -> dict[str, Any]:
     with db_connection(immediate=True) as connection:
         _ensure_user_state(connection, user["id"])
         item = _insert_pantry_item(connection, payload.item, user["id"], payload.createdAt)
@@ -65,9 +61,8 @@ def restore_pantry_item(payload: RestoreRequest, request: Request) -> dict[str, 
 
 
 @router.post("/consume-batch")
-def consume_batch(payload: BatchConsumeRequest, request: Request) -> dict[str, Any]:
+def consume_batch(payload: BatchConsumeRequest, user: CurrentUser) -> dict[str, Any]:
     """Consume several pantry items at once (e.g. after cooking a recipe). All-or-nothing."""
-    user = _current_user(request)
     with db_connection(immediate=True) as connection:
         _ensure_user_state(connection, user["id"])
         log_ids = [_consume(connection, user["id"], entry.id, entry.amount)[1] for entry in payload.items]
@@ -75,9 +70,8 @@ def consume_batch(payload: BatchConsumeRequest, request: Request) -> dict[str, A
 
 
 @router.post("/undo-consume")
-def undo_consume(payload: UndoConsumeRequest, request: Request) -> dict[str, Any]:
+def undo_consume(payload: UndoConsumeRequest, user: CurrentUser) -> dict[str, Any]:
     """Undo "使った" / "作った！": give the amount back, or bring back an item that was used up. All-or-nothing."""
-    user = _current_user(request)
     with db_connection(immediate=True) as connection:
         for entry in payload.entries:
             log = connection.execute("SELECT * FROM consume_log WHERE id = ? AND user_id = ?", (entry.logId, user["id"])).fetchone()
@@ -105,8 +99,7 @@ def undo_consume(payload: UndoConsumeRequest, request: Request) -> dict[str, Any
 
 
 @router.put("/{item_id}")
-def update_pantry_item(item_id: str, payload: PantryItemWrite, request: Request) -> dict[str, Any]:
-    user = _current_user(request)
+def update_pantry_item(item_id: str, payload: PantryItemWrite, user: CurrentUser) -> dict[str, Any]:
     with db_connection(immediate=True) as connection:
         # purchased_quantity only grows: editing the remaining amount down must not
         # change what the price was paid for.
@@ -128,9 +121,8 @@ def update_pantry_item(item_id: str, payload: PantryItemWrite, request: Request)
 
 
 @router.delete("/{item_id}")
-def delete_pantry_item(item_id: str, request: Request, reason: Literal["removed", "discarded"] = "removed") -> dict[str, Any]:
+def delete_pantry_item(item_id: str, user: CurrentUser, reason: Literal["removed", "discarded"] = "removed") -> dict[str, Any]:
     """reason=discarded records the item in the waste log ("もったいない記録"); removed just deletes it."""
-    user = _current_user(request)
     with db_connection(immediate=True) as connection:
         row = connection.execute("SELECT * FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"])).fetchone()
         if row is None:
@@ -150,8 +142,7 @@ def delete_pantry_item(item_id: str, request: Request, reason: Literal["removed"
 
 
 @router.post("/{item_id}/consume")
-def consume_pantry_item(item_id: str, request: Request, payload: ConsumeRequest | None = None) -> dict[str, Any]:
-    user = _current_user(request)
+def consume_pantry_item(item_id: str, user: CurrentUser, payload: ConsumeRequest | None = None) -> dict[str, Any]:
     amount = payload.amount if payload and payload.amount is not None else 1.0
     with db_connection(immediate=True) as connection:
         updated_item, log_id = _consume(connection, user["id"], item_id, amount)
