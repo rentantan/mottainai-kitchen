@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Request
 
 from database import _current_user, _read_staples, db_connection
+from ingredients import matches_name
 from models import ShoppingItemCreate, ShoppingItemUpdate, StaplesWrite
 
 router = APIRouter(prefix="/api")
@@ -38,7 +39,8 @@ def list_shopping(request: Request) -> dict[str, Any]:
 
 @router.post("/shopping")
 def add_shopping(payload: ShoppingItemCreate, request: Request) -> dict[str, Any]:
-    """Add names to the list. Names already on the list (unchecked) are skipped."""
+    """Add names to the list. Names already on the list (unchecked) are skipped, including
+    other spellings of the same food (ネギ / ねぎ / 長ねぎ, 醤油 / しょうゆ)."""
     user = _current_user(request)
     names = _clean_names(payload.names, 60)
     with db_connection() as connection:
@@ -48,7 +50,10 @@ def add_shopping(payload: ShoppingItemCreate, request: Request) -> dict[str, Any
             )
         }
         count = connection.execute("SELECT COUNT(*) AS c FROM shopping_items WHERE user_id = ?", (user["id"],)).fetchone()["c"]
-        new_names = [name for name in names if name not in existing]
+        new_names: list[str] = []
+        for name in names:
+            if not any(matches_name(name, other) for other in [*existing, *new_names]):
+                new_names.append(name)
         if count + len(new_names) > MAX_SHOPPING_ITEMS:
             raise HTTPException(status_code=400, detail=f"買い物リストは{MAX_SHOPPING_ITEMS}件までです")
         now = datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()

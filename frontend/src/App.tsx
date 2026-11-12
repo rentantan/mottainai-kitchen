@@ -32,7 +32,8 @@ function App() {
 
   if (!authToken) return <LoginScreen apiBase={API_BASE} notice={loginNotice} onAuthenticated={handleAuthenticated} />
   // key={authToken}: switching accounts remounts Kitchen, so no state from the previous user survives.
-  return <Kitchen key={authToken} token={authToken} email={authEmail} onLogout={handleLogout} onSessionExpired={() => clearSession('ログインの有効期限が切れました。もう一度ログインしてください。')} />
+  return <Kitchen key={authToken} token={authToken} email={authEmail} onLogout={handleLogout} onSessionExpired={() => clearSession('ログインの有効期限が切れました。もう一度ログインしてください。')}
+    onAccountDeleted={() => clearSession('アカウントとすべてのデータを削除しました。ご利用ありがとうございました。')} />
 }
 
 export default App

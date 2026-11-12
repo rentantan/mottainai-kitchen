@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ArrowRight, Bell, CalendarDays, Settings2 } from 'lucide-react'
+import { ArrowRight, Bell, CalendarDays, Settings2, UserCog } from 'lucide-react'
 import type { PantryItem } from '../types'
 import type { DataStatus, Tab } from '../Kitchen'
 import { daysUntil, expiryText, formatQuantity } from '../utils'
@@ -7,9 +7,9 @@ import { useDismiss } from '../hooks/useDismiss'
 
 const TAB_LABEL: Record<Tab, string> = { pantry: '冷蔵庫の中身', recipes: 'レシピを探す', shopping: '買い物リスト' }
 
-export function Topbar({ activeTab, email, status, pantryCount, consumed, notificationItems, onNotification, onReset, onLogout }: {
+export function Topbar({ activeTab, email, status, pantryCount, consumed, notificationItems, onNotification, onReset, onLogout, onAccount }: {
   activeTab: Tab; email: string; status: DataStatus; pantryCount: number; consumed: number; notificationItems: PantryItem[]
-  onNotification: (days: number) => void; onReset: () => void; onLogout: () => void
+  onNotification: (days: number) => void; onReset: () => void; onLogout: () => void; onAccount: () => void
 }) {
   const [open, setOpen] = useState<'notifications' | 'profile' | null>(null)
   const menusRef = useRef<HTMLDivElement>(null)
@@ -31,6 +31,7 @@ export function Topbar({ activeTab, email, status, pantryCount, consumed, notifi
           <div className="profile-title"><span className="profile-avatar">🥑</span><span><strong>マイキッチン</strong><small>{email}</small></span></div>
           <div className="profile-stats"><span><strong>{pantryCount}</strong>登録中</span><span><strong>{consumed}</strong>使い切り</span></div>
           <div className="storage-status"><span className={`status-dot ${status === 'ready' ? 'is-online' : ''}`} />{status === 'ready' ? 'SQLiteに保存中' : status === 'loading' ? '読み込み中…' : 'オフライン（変更は保存されません）'}</div>
+          <button className="profile-reset" onClick={() => { setOpen(null); onAccount() }}><UserCog size={14} />アカウント設定</button>
           <button className="profile-reset" onClick={() => { setOpen(null); onReset() }}><Settings2 size={14} />サンプル食材を入れる</button>
           <button className="profile-logout" onClick={onLogout}>ログアウト</button>
         </div>}

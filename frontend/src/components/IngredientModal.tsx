@@ -5,7 +5,7 @@ import type { Category, PantryItem } from '../types'
 import { FREEZER_DAYS, categoryEmoji, categoryOptions, dateOffset } from '../data'
 import { findFoodPreset } from '../foodPresets'
 import type { FoodPreset } from '../foodPresets'
-import { useDismiss } from '../hooks/useDismiss'
+import { useModal } from '../hooks/useModal'
 
 const UNIT_SUGGESTIONS = ['個', '本', '枚', '袋', 'パック', '丁', '玉', '束', '缶', '切れ', 'g', 'kg', 'ml', 'L']
 const EXPIRY_SHORTCUTS: { label: string; days: number }[] = [
@@ -28,7 +28,7 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
   const [frozen, setFrozen] = useState(item?.frozen ?? false)
   const [price, setPrice] = useState(item?.priceYen != null ? String(item.priceYen) : '')
   const [validation, setValidation] = useState('')
-  useDismiss(true, onClose)
+  const panelRef = useModal<HTMLElement>(onClose)
 
   // Keep a custom emoji only while the category is unchanged; otherwise follow the guess or the category.
   const emoji = item && item.category === category ? item.emoji
@@ -64,7 +64,7 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
     if (priceYen !== null && !(Number.isInteger(priceYen) && priceYen >= 0 && priceYen <= 100000)) { setValidation('値段は0〜100000の整数（円）で入力してください。'); return }
     onSave({ name: name.trim(), quantity: Number(quantity), unit: unit.trim(), expiryDate, category, emoji, note: note.trim(), frozen, priceYen })
   }
-  return <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}><section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="ingredient-modal-title">
+  return <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}><section ref={panelRef} className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="ingredient-modal-title">
     <div className="modal-header"><div><div className="modal-eyebrow">YOUR PANTRY</div><h2 id="ingredient-modal-title">{item ? '食材を編集' : '食材を追加'}</h2><p>食材の情報を入力してください。</p></div><button className="modal-close" onClick={onClose} aria-label="閉じる"><X size={19} /></button></div>
     <form onSubmit={submit} className="ingredient-form">
       <label className="form-label">食材名 <span>必須</span><input autoFocus value={name} maxLength={80} onChange={(e) => changeName(e.target.value)} placeholder="例：キャベツ" /></label>

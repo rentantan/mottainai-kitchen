@@ -1,6 +1,8 @@
 import re
+import time
 from datetime import timedelta
 from pathlib import Path
+
 
 import auth
 from recipes import FALLBACK_RECIPES, today_japan
@@ -17,7 +19,7 @@ def test_login_locks_after_repeated_failures(client, make_user):
         assert client.post("/api/auth/login", json={"email": email, "password": "wrong-pass"}).status_code == 401
     locked = client.post("/api/auth/login", json={"email": email, "password": "password123"})
     assert locked.status_code == 429
-    auth._login_failures.clear()
+    auth._clear_login_failures()
     assert client.post("/api/auth/login", json={"email": email, "password": "password123"}).status_code == 200
 
 
@@ -162,3 +164,113 @@ def test_frozen_items_are_flagged_in_prompt():
                              preferences={"equipment": "microwave"})
     prompt = _build_prompt(request, [])
     assert "冷凍保存中" in prompt and "電子レンジ（と電気ケトル・炊飯器）だけ" in prompt
+
+
+def _write(item):
+    return {key: item[key] for key in ("name", "quantity", "unit", "expiryDate", "category", "emoji", "note")}
+
+
+def test_undo_partial_and_full_consume(client, make_user):
+    _, headers = make_user()
+    item = client.post("/api/pantry", json=_item("卵", 3, quantity=4), headers=headers).json()
+    partial = client.post(f"/api/pantry/{item['id']}/consume", json={"amount": 1}, headers=headers).json()
+    state = client.post("/api/pantry/undo-consume", json={"entries": [{"logId": partial["logId"]}]}, headers=headers).json()
+    assert state["items"][0]["quantity"] == 4
+
+    full = client.post(f"/api/pantry/{item['id']}/consume", json={"amount": 4}, headers=headers).json()
+    assert full["item"] is None and full["consumedCount"] == 1 and full["waste"]["monthUsedUp"] == 1
+    state = client.post("/api/pantry/undo-consume", json={"entries": [{"logId": full["logId"], "item": _write(item),
+                                                                      "createdAt": item["createdAt"]}]}, headers=headers).json()
+    assert [(i["name"], i["quantity"]) for i in state["items"]] == [("卵", 4)]
+    assert state["consumedCount"] == 0 and state["waste"]["monthUsedUp"] == 0
+    # A log entry can only be undone once.
+    again = client.post("/api/pantry/undo-consume", json={"entries": [{"logId": full["logId"], "item": _write(item)}]}, headers=headers)
+    assert again.status_code == 404
+
+
+def test_undo_consume_batch_and_other_users_logs(client, make_user):
+    _, alice = make_user()
+    _, bob = make_user()
+    egg = client.post("/api/pantry", json=_item("卵", 3, quantity=2), headers=alice).json()
+    milk = client.post("/api/pantry", json=_item("牛乳", 3, quantity=1, unit="本"), headers=alice).json()
+    state = client.post("/api/pantry/consume-batch", json={"items": [{"id": egg["id"], "amount": 1}, {"id": milk["id"], "amount": 1}]},
+                        headers=alice).json()
+    assert len(state["logIds"]) == 2
+    entries = [{"logId": state["logIds"][0]}, {"logId": state["logIds"][1], "item": _write(milk), "createdAt": milk["createdAt"]}]
+    assert client.post("/api/pantry/undo-consume", json={"entries": entries}, headers=bob).status_code == 404
+    restored = client.post("/api/pantry/undo-consume", json={"entries": entries}, headers=alice).json()
+    assert sorted((i["name"], i["quantity"]) for i in restored["items"]) == [("卵", 2), ("牛乳", 1)]
+
+
+def test_reset_can_keep_records(client, make_user):
+    _, headers = make_user()
+    created = client.post("/api/pantry", json=_item("豆腐", -1, unit="丁"), headers=headers).json()
+    client.delete(f"/api/pantry/{created['id']}?reason=discarded", headers=headers)
+    kept = client.put("/api/pantry/reset?keep_records=true", json=[], headers=headers).json()
+    assert kept["items"] == [] and kept["waste"]["totalCount"] == 1
+    cleared = client.put("/api/pantry/reset", json=[], headers=headers).json()
+    assert cleared["waste"]["totalCount"] == 0
+
+
+def test_lockout_is_per_ip_so_strangers_cannot_lock_you_out(client, make_user, monkeypatch):
+    email, _ = make_user()
+    monkeypatch.setattr(auth, "_client_ip", lambda request: "203.0.113.9")  # the attacker's network
+    for _ in range(auth.MAX_LOGIN_FAILURES):
+        client.post("/api/auth/login", json={"email": email, "password": "wrong-pass"})
+    assert client.post("/api/auth/login", json={"email": email, "password": "password123"}).status_code == 429
+    # The owner, from their own network, can still log in.
+    monkeypatch.setattr(auth, "_client_ip", lambda request: "198.51.100.7")
+    assert client.post("/api/auth/login", json={"email": email, "password": "password123"}).status_code == 200
+
+
+def test_registration_is_rate_limited_per_ip(client, monkeypatch):
+    monkeypatch.setattr(auth, "MAX_REGISTRATIONS_PER_IP", 2)
+    for n in range(2):
+        assert client.post("/api/auth/register", json={"email": f"r{n}-{time.time()}@example.com", "password": "password123"}).status_code == 200
+    assert client.post("/api/auth/register", json={"email": f"r9-{time.time()}@example.com", "password": "password123"}).status_code == 429
+
+
+def test_change_password_logs_out_other_devices(client, make_user):
+    email, headers = make_user()
+    other = {"Authorization": "Bearer " + client.post("/api/auth/login", json={"email": email, "password": "password123"}).json()["token"]}
+    assert client.post("/api/auth/password", json={"currentPassword": "wrong", "newPassword": "newpassword1"}, headers=headers).status_code == 403
+    assert client.post("/api/auth/password", json={"currentPassword": "password123", "newPassword": "newpassword1"}, headers=headers).status_code == 200
+    assert client.get("/api/pantry", headers=headers).status_code == 200
+    assert client.get("/api/pantry", headers=other).status_code == 401
+    assert client.post("/api/auth/login", json={"email": email, "password": "newpassword1"}).status_code == 200
+
+
+def test_logout_other_devices_keeps_current_session(client, make_user):
+    email, headers = make_user()
+    other = {"Authorization": "Bearer " + client.post("/api/auth/login", json={"email": email, "password": "password123"}).json()["token"]}
+    assert client.post("/api/auth/logout-others", headers=headers).json()["loggedOut"] == 1
+    assert client.get("/api/pantry", headers=headers).status_code == 200
+    assert client.get("/api/pantry", headers=other).status_code == 401
+
+
+def test_delete_account_removes_all_data(client, make_user):
+    email, headers = make_user()
+    client.post("/api/pantry", json=_item("卵", 3), headers=headers)
+    client.post("/api/shopping", json={"names": ["もやし"]}, headers=headers)
+    assert client.request("DELETE", "/api/auth/account", json={"password": "wrong"}, headers=headers).status_code == 403
+    assert client.request("DELETE", "/api/auth/account", json={"password": "password123"}, headers=headers).status_code == 200
+    assert client.get("/api/pantry", headers=headers).status_code == 401
+    assert client.post("/api/auth/login", json={"email": email, "password": "password123"}).status_code == 401
+    # The address can be registered again from scratch.
+    fresh = client.post("/api/auth/register", json={"email": email, "password": "password123"}).json()
+    assert client.get("/api/pantry", headers={"Authorization": f"Bearer {fresh['token']}"}).json()["items"] == []
+
+
+def test_shopping_list_skips_other_spellings(client, make_user):
+    _, headers = make_user()
+    client.post("/api/shopping", json={"names": ["長ねぎ", "醤油"]}, headers=headers)
+    result = client.post("/api/shopping", json={"names": ["ネギ", "しょうゆ", "玉ねぎ", "玉葱"]}, headers=headers).json()
+    assert result["added"] == 1 and sorted(i["name"] for i in result["items"]) == sorted(["長ねぎ", "醤油", "玉ねぎ"])
+
+
+def test_relative_database_path_is_resolved_from_backend_dir(monkeypatch):
+    import config
+    monkeypatch.setenv("DATABASE_PATH", "data/x.db")
+    assert config._database_path() == str(Path(config.__file__).resolve().parent / "data" / "x.db")
+    monkeypatch.setenv("DATABASE_PATH", "/tmp/abs.db")
+    assert config._database_path() == "/tmp/abs.db"

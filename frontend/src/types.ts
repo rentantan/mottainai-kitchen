@@ -57,5 +57,5 @@ export type WasteEntry = {
   valueYen?: number | null
 }
 /** Discarded food ("もったいない記録"): recent entries plus all-time / this-month counts. */
-export type WasteSummary = { items: WasteEntry[]; totalCount: number; monthCount: number; totalYen?: number; monthYen?: number }
+export type WasteSummary = { items: WasteEntry[]; totalCount: number; monthCount: number; totalYen?: number; monthYen?: number; monthUsedUp?: number }
 export type PantryState = { items: PantryItem[]; consumedCount: number; initialized: boolean; waste: WasteSummary }

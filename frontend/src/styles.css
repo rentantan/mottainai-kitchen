@@ -273,3 +273,15 @@ body{background:radial-gradient(1200px 500px at 85% -10%,#eef5e8 0%,transparent 
   .freeze-button{font-size:12px;padding:6px 7px}
   .pantry-heading-actions{gap:10px}
 }
+/* Modal focus & account settings */
+.modal-panel:focus{outline:none}
+.account-form{gap:0}
+.account-section{display:flex;flex-direction:column;gap:12px;padding:16px 0;border-top:1px solid var(--line)}
+.account-section:first-of-type{border-top:0;padding-top:4px}
+.account-section h3{display:flex;align-items:center;gap:7px;margin:0;font-size:15px}
+.account-section>button{align-self:flex-start}
+.account-note{margin:0;font-size:13px;color:var(--muted);line-height:1.7}
+.account-check{display:flex;align-items:center;gap:8px;font-size:13px;color:#5b4744}
+.account-danger h3{color:var(--red)}
+.danger-button{align-self:flex-start;border:0;border-radius:9px;padding:10px 16px;background:var(--red);color:#fff;font-weight:700;font-size:14px}
+.danger-button:disabled{opacity:.45}

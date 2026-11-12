@@ -168,6 +168,21 @@ def init_database() -> None:
         if "value_yen" not in waste_columns:
             connection.execute("ALTER TABLE waste_log ADD COLUMN value_yen INTEGER")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_waste_log_user_id ON waste_log(user_id, discarded_at)")
+        # Every "使った" is logged so it can be undone and so this month's use-up rate can be shown.
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS consume_log (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                item_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                amount REAL NOT NULL,
+                used_up INTEGER NOT NULL DEFAULT 0,
+                consumed_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_consume_log_user_id ON consume_log(user_id, consumed_at)")
         connection.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (time.time(),))
         connection.execute(
             """
@@ -245,6 +260,10 @@ def _read_waste(connection: sqlite3.Connection, user_id: str) -> dict[str, Any]:
         "FROM waste_log WHERE user_id = ?",
         (month_prefix, month_prefix, user_id),
     ).fetchone()
+    used_up = connection.execute(
+        "SELECT COUNT(*) AS month FROM consume_log WHERE user_id = ? AND used_up = 1 AND substr(consumed_at, 1, 7) = ?",
+        (user_id, month_prefix),
+    ).fetchone()
     return {
         "items": [{
             "id": row["id"], "name": row["name"], "quantity": row["quantity"], "unit": row["unit"],
@@ -255,6 +274,8 @@ def _read_waste(connection: sqlite3.Connection, user_id: str) -> dict[str, Any]:
         "monthCount": int(counts["month"] or 0),
         "totalYen": int(counts["total_yen"] or 0),
         "monthYen": int(counts["month_yen"] or 0),
+        # Items used up this month (from consume_log), for this month's use-up rate.
+        "monthUsedUp": int(used_up["month"] or 0),
     }
 
 

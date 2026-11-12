@@ -3,13 +3,13 @@ import type { FormEvent } from 'react'
 import { Check, X } from 'lucide-react'
 import type { PantryItem } from '../types'
 import { formatQuantity } from '../utils'
-import { useDismiss } from '../hooks/useDismiss'
+import { useModal } from '../hooks/useModal'
 
 /** Ask how much was used: presets (1 unit / half / all) or a custom amount. */
 export function ConsumeModal({ item, onClose, onConsume }: { item: PantryItem; onClose: () => void; onConsume: (amount: number) => void }) {
   const [custom, setCustom] = useState('')
   const [error, setError] = useState('')
-  useDismiss(true, onClose)
+  const panelRef = useModal<HTMLElement>(onClose)
   const presets: { label: string; amount: number }[] = []
   if (item.quantity > 1) presets.push({ label: `1${item.unit}`, amount: 1 })
   if (item.quantity > 1 || item.quantity === 1 && !['個', '本', '枚', '丁', '缶', '玉'].includes(item.unit)) presets.push({ label: '半分', amount: item.quantity / 2 })
@@ -22,7 +22,7 @@ export function ConsumeModal({ item, onClose, onConsume }: { item: PantryItem; o
     onConsume(Math.min(value, item.quantity))
   }
 
-  return <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}><section className="modal-panel consume-panel" role="dialog" aria-modal="true" aria-labelledby="consume-modal-title">
+  return <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}><section ref={panelRef} className="modal-panel consume-panel" role="dialog" aria-modal="true" aria-labelledby="consume-modal-title">
     <div className="modal-header"><div><div className="modal-eyebrow">USE IT UP</div><h2 id="consume-modal-title">{item.emoji} {item.name}をどれくらい使った？</h2><p>残り {formatQuantity(item.quantity)}{item.unit}</p></div><button className="modal-close" onClick={onClose} aria-label="閉じる"><X size={19} /></button></div>
     <div className="ingredient-form">
       <div className="consume-presets">{presets.map((preset) => <button key={preset.label} type="button" className="consume-preset" onClick={() => onConsume(preset.amount)}>{preset.label}</button>)}</div>

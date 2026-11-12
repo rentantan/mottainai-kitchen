@@ -23,4 +23,18 @@ MAX_REQUESTS_PER_HOUR_PER_USER = int(os.getenv(
     "GEMINI_MAX_REQUESTS_PER_HOUR_PER_USER", os.getenv("GEMINI_MAX_REQUESTS_PER_HOUR_PER_IP", "3")))
 MIN_REQUEST_INTERVAL_SECONDS = float(os.getenv("GEMINI_MIN_REQUEST_INTERVAL_SECONDS", "20"))
 PROMPT_VERSION = "student-recipe-v7"  # bump when prompt or ingredient matching changes (invalidates cache)
-DATABASE_PATH = os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent / "data" / "mottainai.db"))
+_BACKEND_DIR = Path(__file__).resolve().parent
+
+
+def _database_path() -> str:
+    """A relative DATABASE_PATH is taken from the backend folder, not from wherever uvicorn
+    was started, so the same .env always points at the same file."""
+    raw = os.getenv("DATABASE_PATH", "").strip()
+    if not raw:
+        return str(_BACKEND_DIR / "data" / "mottainai.db")
+    if raw == ":memory:" or Path(raw).is_absolute():
+        return raw
+    return str(_BACKEND_DIR / raw)
+
+
+DATABASE_PATH = _database_path()

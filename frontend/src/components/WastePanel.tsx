@@ -5,8 +5,12 @@ import { formatQuantity, normalize } from '../utils'
 
 /** "もったいない記録": how much food was thrown away, and which items get wasted most often. */
 export function WastePanel({ waste, consumed }: { waste: WasteSummary; consumed: number }) {
+  // This month's rate: items used up vs. thrown away this month. The all-time rate is shown as a note.
+  const monthUsedUp = waste.monthUsedUp ?? 0
+  const monthHandled = monthUsedUp + waste.monthCount
+  const monthRate = monthHandled ? Math.round((monthUsedUp / monthHandled) * 100) : null
   const handled = consumed + waste.totalCount
-  const useRate = handled ? Math.round((consumed / handled) * 100) : null
+  const totalRate = handled ? Math.round((consumed / handled) * 100) : null
   // Most frequently discarded name among the recent entries (only worth pointing out if repeated).
   const repeated = useMemo(() => {
     const counts = new Map<string, { name: string; emoji: string; count: number }>()
@@ -25,7 +29,7 @@ export function WastePanel({ waste, consumed }: { waste: WasteSummary; consumed:
       <div className="waste-stats">
         <div><span className="waste-stat-label">今月捨てた</span><strong>{waste.monthCount}<small>品</small></strong>{(waste.monthYen ?? 0) > 0 && <span className="waste-stat-note waste-yen">約{waste.monthYen!.toLocaleString()}円分</span>}</div>
         <div><span className="waste-stat-label">これまで</span><strong>{waste.totalCount}<small>品</small></strong>{(waste.totalYen ?? 0) > 0 && <span className="waste-stat-note waste-yen">約{waste.totalYen!.toLocaleString()}円分</span>}</div>
-        <div><span className="waste-stat-label">使い切り率</span><strong>{useRate === null ? '—' : <>{useRate}<small>%</small></>}</strong><span className="waste-stat-note">使い切り{consumed}品 / 捨てた{waste.totalCount}品</span></div>
+        <div><span className="waste-stat-label">今月の使い切り率</span><strong>{monthRate === null ? '—' : <>{monthRate}<small>%</small></>}</strong><span className="waste-stat-note">今月 使い切り{monthUsedUp}品 / 捨てた{waste.monthCount}品{totalRate !== null && ` · これまで${totalRate}%`}</span></div>
       </div>
       {repeated && <p className="waste-tip"><Lightbulb size={15} />{repeated.emoji} {repeated.name}を最近{repeated.count}回捨てています。次は少なめに買うか、期限が近づいたら冷蔵庫の一覧の ❄️ で冷凍してみよう。</p>}
       {waste.items.length ? <ul className="waste-list">{waste.items.slice(0, 5).map((entry) => <li key={entry.id}>

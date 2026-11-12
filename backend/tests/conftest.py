@@ -20,7 +20,7 @@ from main import app  # noqa: E402
 
 @pytest.fixture
 def client():
-    auth._login_failures.clear()
+    auth._clear_login_failures()
     return TestClient(app)
 
 

@@ -52,6 +52,17 @@ class BatchConsumeRequest(BaseModel):
     items: list[BatchConsumeEntry] = Field(min_length=1, max_length=50)
 
 
+class UndoConsumeEntry(BaseModel):
+    logId: str = Field(min_length=1, max_length=64)
+    # The item as it was before "使った"; needed to bring back an item that was used up.
+    item: PantryItemWrite | None = None
+    createdAt: str | None = Field(default=None, max_length=40)
+
+
+class UndoConsumeRequest(BaseModel):
+    entries: list[UndoConsumeEntry] = Field(min_length=1, max_length=50)
+
+
 class RecipePreferences(BaseModel):
     budget_yen: Literal[300, 500, 700] = 500
     max_minutes: Literal[10, 20, 30] = 20
@@ -84,6 +95,15 @@ class StaplesWrite(BaseModel):
 class AuthCredentials(BaseModel):
     email: str = Field(min_length=5, max_length=254)
     password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordChange(BaseModel):
+    currentPassword: str = Field(min_length=1, max_length=128)
+    newPassword: str = Field(min_length=8, max_length=128)
+
+
+class AccountDelete(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
 
 
 class AuthSession(BaseModel):
