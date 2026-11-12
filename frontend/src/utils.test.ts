@@ -115,6 +115,14 @@ describe('saved recipes', () => {
     expect(rankSavedRecipes(list, [], []).map((r) => r.name)).toEqual(['豚キャベツ炒め', '卵かけごはん', '親子丼'])
   })
 
+  it('puts often-cooked dishes first among equals and passes the count through', () => {
+    const cooked = list.map((entry) => entry.id === 'a' ? entry : { ...entry, cookedCount: entry.id === 'c' ? 3 : 1 })
+    // 豚キャベツ炒め needs 2 purchases; the other two need 3, so it stays first.
+    const ranked = rankSavedRecipes(cooked, [], [])
+    expect(ranked.map((r) => r.name)).toEqual(['豚キャベツ炒め', '親子丼', '卵かけごはん'])
+    expect(ranked.map((r) => r.cookedCount)).toEqual([0, 3, 1])
+  })
+
   it('finds a saved recipe by name and drops pantry-dependent fields when saving', () => {
     expect(findSaved({ name: ' 親子丼 ' }, list)?.id).toBe('c')
     expect(findSaved({ name: '牛丼' }, list)).toBeUndefined()

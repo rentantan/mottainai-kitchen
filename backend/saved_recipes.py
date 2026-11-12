@@ -21,7 +21,7 @@ MAX_SAVED_RECIPES = 50
 
 def _read_saved(connection, user_id: str) -> list[dict[str, Any]]:
     rows = connection.execute(
-        "SELECT id, recipe_json, saved_at FROM saved_recipes WHERE user_id = ? ORDER BY saved_at DESC", (user_id,)
+        "SELECT id, recipe_json, saved_at, cooked_count, last_cooked_at FROM saved_recipes WHERE user_id = ? ORDER BY saved_at DESC", (user_id,)
     ).fetchall()
     items = []
     for row in rows:
@@ -29,7 +29,8 @@ def _read_saved(connection, user_id: str) -> list[dict[str, Any]]:
             recipe = json.loads(row["recipe_json"])
         except json.JSONDecodeError:
             continue
-        items.append({"id": row["id"], "savedAt": row["saved_at"], "recipe": recipe})
+        items.append({"id": row["id"], "savedAt": row["saved_at"], "recipe": recipe,
+                      "cookedCount": int(row["cooked_count"]), "lastCookedAt": row["last_cooked_at"]})
     return items
 
 
@@ -75,4 +76,31 @@ def save_recipe(payload: SavedRecipeWrite, user: CurrentUser) -> dict[str, Any]:
 def delete_saved(saved_id: str, user: CurrentUser) -> dict[str, Any]:
     with db_connection() as connection:
         connection.execute("DELETE FROM saved_recipes WHERE id = ? AND user_id = ?", (saved_id, user["id"]))
+        return {"items": _read_saved(connection, user["id"])}
+
+
+@router.post("/{saved_id}/cooked")
+def record_cooked(saved_id: str, user: CurrentUser) -> dict[str, Any]:
+    """Count one "作った！" of a saved recipe."""
+    now = datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()
+    with db_connection() as connection:
+        result = connection.execute(
+            "UPDATE saved_recipes SET cooked_count = cooked_count + 1, last_cooked_at = ? WHERE id = ? AND user_id = ?",
+            (now, saved_id, user["id"]),
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="保存したレシピが見つかりません")
+        return {"items": _read_saved(connection, user["id"])}
+
+
+@router.delete("/{saved_id}/cooked")
+def undo_cooked(saved_id: str, user: CurrentUser) -> dict[str, Any]:
+    """Undo one "作った！" (the toast's 元に戻す). Never goes below zero; the date is cleared at zero."""
+    with db_connection() as connection:
+        connection.execute(
+            "UPDATE saved_recipes SET cooked_count = MAX(cooked_count - 1, 0), "
+            "last_cooked_at = CASE WHEN cooked_count <= 1 THEN NULL ELSE last_cooked_at END "
+            "WHERE id = ? AND user_id = ?",
+            (saved_id, user["id"]),
+        )
         return {"items": _read_saved(connection, user["id"])}

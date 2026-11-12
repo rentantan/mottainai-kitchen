@@ -37,12 +37,15 @@ export type Recipe = {
   expiryPriorityScore?: number
   nearestExpiryDays?: number
   microwaveOnly?: boolean
+  /** Saved recipes only: times cooked with "作った！" and when last. */
+  cookedCount?: number
+  lastCookedAt?: string | null
 }
 
 /** The pantry-independent part of a recipe (what is saved; matching is redone against the current fridge). */
-export type RecipeBase = Omit<Recipe, 'matchedIngredients' | 'missingIngredients' | 'usesExpiring' | 'matchPercent' | 'expiryPriorityScore' | 'nearestExpiryDays'>
+export type RecipeBase = Omit<Recipe, 'matchedIngredients' | 'missingIngredients' | 'usesExpiring' | 'matchPercent' | 'expiryPriorityScore' | 'nearestExpiryDays' | 'cookedCount' | 'lastCookedAt'>
 /** A recipe the user saved ("保存したレシピ"), reusable without calling Gemini. */
-export type SavedRecipe = { id: string; savedAt: string; recipe: RecipeBase }
+export type SavedRecipe = { id: string; savedAt: string; recipe: RecipeBase; cookedCount?: number; lastCookedAt?: string | null }
 
 export type ShoppingItem = {
   id: string

@@ -230,10 +230,15 @@ def _migrate_to_v2(connection: sqlite3.Connection) -> None:
         """
     )
 
+def _migrate_to_v3(connection: sqlite3.Connection) -> None:
+    """How often / when a saved recipe was cooked (counted by "作った！")."""
+    connection.execute("ALTER TABLE saved_recipes ADD COLUMN cooked_count INTEGER NOT NULL DEFAULT 0")
+    connection.execute("ALTER TABLE saved_recipes ADD COLUMN last_cooked_at TEXT")
+
 
 # Schema changes, oldest first. PRAGMA user_version records how many have been applied, so each
 # runs once per database. To change the schema, append a function here; never edit an old one.
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migrate_to_v1, _migrate_to_v2]
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migrate_to_v1, _migrate_to_v2, _migrate_to_v3]
 
 
 def schema_version(connection: sqlite3.Connection) -> int:
