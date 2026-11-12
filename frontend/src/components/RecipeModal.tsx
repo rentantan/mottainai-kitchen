@@ -1,16 +1,21 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, ArrowLeft, Check, ChefHat, Clock3, ListPlus, Plus, ShoppingBasket, Utensils, Wallet, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bookmark, BookmarkCheck, Check, ChefHat, Clock3, ListPlus, Plus, ShoppingBasket, Utensils, Wallet, X } from 'lucide-react'
 import type { PantryItem, Recipe } from '../types'
 import { useModal } from '../hooks/useModal'
 import { daysUntil, expiryText, formatQuantity, guessAmount, isStaple, pantryMatchesFor } from '../utils'
 
 type CookLine = { item: PantryItem; detail: string; checked: boolean; amount: string }
 
-export function RecipeModal({ recipe, pantry, staples, busy, onClose, onAddToShopping, onCooked }: {
+export function RecipeModal({ recipe, pantry, staples, busy, saved, canSave, onToggleSaved, onClose, onAddToShopping, onCooked }: {
   recipe: Recipe
   pantry: PantryItem[]
   staples: string[]
   busy: boolean
+  /** Already in "保存したレシピ". */
+  saved: boolean
+  /** False while offline (saving needs the server). */
+  canSave: boolean
+  onToggleSaved: () => void
   onClose: () => void
   onAddToShopping: (names: string[]) => void
   onCooked: (entries: { id: string; amount: number }[]) => void
@@ -47,7 +52,7 @@ export function RecipeModal({ recipe, pantry, staples, busy, onClose, onAddToSho
   const cookInvalid = (cookLines ?? []).some((line) => line.checked && !(Number(line.amount) > 0))
 
   return <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}><section ref={panelRef} className="modal-panel recipe-modal-panel" role="dialog" aria-modal="true" aria-labelledby="recipe-modal-title">
-    <div className="recipe-modal-hero"><div className="recipe-modal-emoji">{recipe.emoji}</div><button className="modal-close recipe-modal-close" onClick={onClose} aria-label="閉じる"><X size={19} /></button><div className="modal-eyebrow">RECIPE IDEA</div><h2 id="recipe-modal-title">{recipe.name}</h2><p>{recipe.description}</p><div className="recipe-modal-meta"><span><Clock3 size={14} />約{recipe.minutes}分</span><span><ChefHat size={14} />{recipe.difficulty}</span><span><Wallet size={14} />約{recipe.estimatedCostYen ?? '—'}円/人</span><span>1人分</span></div></div>
+    <div className="recipe-modal-hero"><div className="recipe-modal-emoji">{recipe.emoji}</div><button className="modal-close recipe-modal-close" onClick={onClose} aria-label="閉じる"><X size={19} /></button><div className="modal-eyebrow">RECIPE IDEA</div><h2 id="recipe-modal-title">{recipe.name}</h2><p>{recipe.description}</p><div className="recipe-modal-meta"><span><Clock3 size={14} />約{recipe.minutes}分</span><span><ChefHat size={14} />{recipe.difficulty}</span><span><Wallet size={14} />約{recipe.estimatedCostYen ?? '—'}円/人</span><span>1人分</span></div>{canSave && <button type="button" className={`save-recipe-button ${saved ? 'is-saved' : ''}`} onClick={onToggleSaved} disabled={busy} aria-pressed={saved}>{saved ? <BookmarkCheck size={15} /> : <Bookmark size={15} />}{saved ? '保存済み' : 'このレシピを保存'}</button>}</div>
     {cookLines === null ? <div className="recipe-modal-body">
       <h3><ShoppingBasket size={17} />材料の目安</h3>
       <div className="recipe-ingredient-list">{rows.map((row, index) => <div className="recipe-ingredient-row" key={`${row.ingredient}-${index}`}>

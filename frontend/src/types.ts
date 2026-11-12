@@ -39,6 +39,11 @@ export type Recipe = {
   microwaveOnly?: boolean
 }
 
+/** The pantry-independent part of a recipe (what is saved; matching is redone against the current fridge). */
+export type RecipeBase = Omit<Recipe, 'matchedIngredients' | 'missingIngredients' | 'usesExpiring' | 'matchPercent' | 'expiryPriorityScore' | 'nearestExpiryDays'>
+/** A recipe the user saved ("保存したレシピ"), reusable without calling Gemini. */
+export type SavedRecipe = { id: string; savedAt: string; recipe: RecipeBase }
+
 export type ShoppingItem = {
   id: string
   name: string

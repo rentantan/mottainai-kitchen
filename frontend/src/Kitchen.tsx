@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CircleCheck, RefreshCw } from 'lucide-react'
-import type { PantryItem, PantryState, Recipe, ShoppingItem, WasteSummary } from './types'
+import type { PantryItem, PantryState, Recipe, SavedRecipe, ShoppingItem, WasteSummary } from './types'
 import { FREEZER_DAYS, dateOffset, demoItems } from './data'
 import { ApiError, apiFetch } from './api'
-import { daysUntil, formatQuantity, loadCachedPantry, saveCachedPantry } from './utils'
+import { daysUntil, findSaved, formatQuantity, loadCachedPantry, saveCachedPantry, toSavedPayload } from './utils'
 import { useToast } from './hooks/useToast'
 import { useShopping } from './hooks/useShopping'
 import { useRecipes } from './hooks/useRecipes'
@@ -38,6 +38,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
   const [consumed, setConsumed] = useState(0)
   const [waste, setWaste] = useState<WasteSummary>(EMPTY_WASTE)
   const [staples, setStaples] = useState<string[]>([])
+  const [savedRecipes, setSavedRecipes] = useState<SavedRecipe[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('pantry')
   const [filter, setFilter] = useState<PantryFilter>('all')
   const [editing, setEditing] = useState<PantryItem | null>(null)
@@ -75,15 +76,17 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
         const seed = loadCachedPantry(email) ?? []
         state = await call<PantryState>('/api/pantry/reset', { method: 'PUT', body: seed.map(toWrite) })
       }
-      const [shoppingState, staplesState] = await Promise.all([
+      const [shoppingState, staplesState, savedState] = await Promise.all([
         call<{ items: ShoppingItem[] }>('/api/shopping'),
         call<{ names: string[] }>('/api/staples'),
+        call<{ items: SavedRecipe[] }>('/api/recipes/saved'),
       ])
       setPantry(state.items)
       setConsumed(state.consumedCount)
       setWaste(state.waste ?? EMPTY_WASTE)
       shoppingList.replace(shoppingState.items)
       setStaples(staplesState.names)
+      setSavedRecipes(savedState.items)
       setStatus('ready')
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) return
@@ -254,6 +257,28 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
     })
   }
 
+  /** Save a recipe to "保存したレシピ", or remove it if already saved (undoable from the toast). */
+  function toggleSaved(recipe: Recipe) {
+    const existing = findSaved(recipe, savedRecipes)
+    void mutate(async () => {
+      if (!existing) {
+        const result = await call<{ items: SavedRecipe[] }>('/api/recipes/saved', { method: 'POST', body: toSavedPayload(recipe) })
+        setSavedRecipes(result.items)
+        return `「${recipe.name}」を保存しました。レシピ画面の「保存したレシピ」からいつでも作れます`
+      }
+      const result = await call<{ items: SavedRecipe[] }>(`/api/recipes/saved/${existing.id}`, { method: 'DELETE' })
+      setSavedRecipes(result.items)
+      return {
+        message: `「${recipe.name}」を保存したレシピから外しました`,
+        action: { label: '元に戻す', onClick: () => { hide(); void mutate(async () => {
+          const restored = await call<{ items: SavedRecipe[] }>('/api/recipes/saved', { method: 'POST', body: toSavedPayload(existing.recipe) })
+          setSavedRecipes(restored.items)
+          return '元に戻しました'
+        }) } },
+      }
+    })
+  }
+
   const notificationItems = useMemo(() => [...pantry].filter((item) => daysUntil(item.expiryDate) <= 3).sort((a, b) => a.expiryDate.localeCompare(b.expiryDate)), [pantry, today]) // eslint-disable-line react-hooks/exhaustive-deps -- today: recompute days left after midnight
   const openShopping = shopping.filter((item) => !item.checked).length
 
@@ -269,7 +294,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
           onFreeze={handleFreeze} onLoadSample={resetDemo} onClearAll={clearAll} />}
         {activeTab === 'recipes' && <RecipesView recipes={suggestions.recipes} loading={suggestions.loading || status === 'loading'} stale={suggestions.stale} source={suggestions.source} message={suggestions.message}
           budgetYen={suggestions.budgetYen} onBudget={suggestions.setBudgetYen} maxMinutes={suggestions.maxMinutes} onMaxMinutes={suggestions.setMaxMinutes} equipment={suggestions.equipment} onEquipment={suggestions.setEquipment}
-          staples={staples} onSaveStaples={saveStaples} busy={busy} onRefresh={() => void suggestions.refresh(!suggestions.stale)} onSelect={setSelectedRecipe} onShowPantry={() => setActiveTab('pantry')} />}
+          staples={staples} onSaveStaples={saveStaples} savedRecipes={savedRecipes} pantry={pantry} busy={busy} onRefresh={() => void suggestions.refresh(!suggestions.stale)} onSelect={setSelectedRecipe} onShowPantry={() => setActiveTab('pantry')} />}
         {activeTab === 'shopping' && <ShoppingView items={shopping} busy={busy}
           onAdd={(name) => addToShopping([name])}
           onToggle={shoppingList.toggle} onDelete={shoppingList.remove} onClearChecked={shoppingList.clearChecked}
@@ -282,7 +307,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
       {deleting && <DeleteModal item={deleting} onClose={() => setDeleting(null)} onDelete={(reason) => handleDelete(deleting, reason)} />}
       {consuming && <ConsumeModal item={consuming} onClose={() => setConsuming(null)} onConsume={(amount) => handleConsume(consuming, amount)} />}
       {showAccount && <AccountModal email={email} call={call} onClose={() => setShowAccount(false)} onDone={(message) => show(message)} onDeleted={onAccountDeleted} />}
-      {selectedRecipe && <RecipeModal recipe={selectedRecipe} pantry={pantry} staples={staples} busy={busy} onClose={() => setSelectedRecipe(null)} onAddToShopping={addToShopping} onCooked={handleCooked} />}
+      {selectedRecipe && <RecipeModal recipe={selectedRecipe} pantry={pantry} staples={staples} busy={busy} saved={findSaved(selectedRecipe, savedRecipes) !== undefined} canSave={status === 'ready'} onToggleSaved={() => toggleSaved(selectedRecipe)} onClose={() => setSelectedRecipe(null)} onAddToShopping={addToShopping} onCooked={handleCooked} />}
     </div>
   )
 }

@@ -81,6 +81,23 @@ class SuggestRequest(BaseModel):
         default_factory=list, max_length=9)
 
 
+class SavedRecipeWrite(BaseModel):
+    """The pantry-independent part of a recipe. Matched / missing ingredients are worked out
+    again against the current fridge whenever the saved recipe is shown."""
+    name: str = Field(min_length=1, max_length=60)
+    description: str = Field(default="", max_length=300)
+    minutes: int = Field(ge=1, le=180)
+    difficulty: Literal["かんたん", "ふつう"] = "かんたん"
+    emoji: str = Field(default="🍳", max_length=8)
+    ingredients: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]] = Field(
+        min_length=1, max_length=30)
+    ingredientDetails: list[Annotated[str, StringConstraints(max_length=100)]] = Field(default_factory=list, max_length=30)
+    steps: list[Annotated[str, StringConstraints(max_length=400)]] = Field(default_factory=list, max_length=20)
+    estimatedCostYen: int | None = Field(default=None, ge=0, le=10000)
+    microwaveOnly: bool = False
+    source: str = Field(default="", max_length=40)
+
+
 class ShoppingItemCreate(BaseModel):
     names: list[str] = Field(min_length=1, max_length=30)
 

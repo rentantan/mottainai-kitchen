@@ -171,7 +171,7 @@ def change_password(payload: PasswordChange, user: CurrentUser, request: Request
 # Every table holding per-user rows. Deleted explicitly because older tables were
 # created without ON DELETE CASCADE.
 _USER_TABLES = ("pantry_items", "app_state", "recipe_suggestion_cache", "shopping_items", "pantry_staples",
-                "waste_log", "consume_log", "gemini_user_daily_usage", "auth_sessions")
+                "waste_log", "consume_log", "gemini_user_daily_usage", "saved_recipes", "auth_sessions")
 
 
 @router.delete("/account")

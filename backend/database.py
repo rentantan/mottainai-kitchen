@@ -215,10 +215,25 @@ def _migrate_to_v1(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_to_v2(connection: sqlite3.Connection) -> None:
+    """Saved (favourite) recipes, so a dish can be cooked again without asking Gemini."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS saved_recipes (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            recipe_json TEXT NOT NULL,
+            saved_at TEXT NOT NULL,
+            UNIQUE (user_id, name)
+        )
+        """
+    )
+
 
 # Schema changes, oldest first. PRAGMA user_version records how many have been applied, so each
 # runs once per database. To change the schema, append a function here; never edit an old one.
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migrate_to_v1]
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migrate_to_v1, _migrate_to_v2]
 
 
 def schema_version(connection: sqlite3.Connection) -> int:

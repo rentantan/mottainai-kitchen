@@ -1,19 +1,22 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { ArrowRight, CheckCircle2, ChefHat, Clock3, Flame, Plus, Refrigerator, Sparkles, Wallet, X } from 'lucide-react'
-import type { Recipe } from '../types'
+import { ArrowRight, BookmarkCheck, CheckCircle2, ChefHat, Clock3, Flame, Plus, Refrigerator, Sparkles, Wallet, X } from 'lucide-react'
+import type { PantryItem, Recipe, SavedRecipe } from '../types'
+import { rankSavedRecipes } from '../utils'
 import type { Equipment } from '../data'
 
 const STAPLE_SUGGESTIONS = ['しょうゆ', '塩', 'こしょう', '砂糖', 'サラダ油', 'みりん', '酒', '味噌', 'マヨネーズ', 'ケチャップ', 'ごま油', '酢']
 
-export function RecipesView({ recipes, loading, stale, source, message, budgetYen, onBudget, maxMinutes, onMaxMinutes, equipment, onEquipment, staples, onSaveStaples, busy, onRefresh, onSelect, onShowPantry }: {
+export function RecipesView({ recipes, loading, stale, source, message, budgetYen, onBudget, maxMinutes, onMaxMinutes, equipment, onEquipment, staples, onSaveStaples, savedRecipes, pantry, busy, onRefresh, onSelect, onShowPantry }: {
   recipes: Recipe[]; loading: boolean; stale: boolean; source: 'gemini' | 'local'; message: string
   budgetYen: 300 | 500 | 700; onBudget: (value: 300 | 500 | 700) => void; maxMinutes: 10 | 20 | 30; onMaxMinutes: (value: 10 | 20 | 30) => void
   equipment: Equipment; onEquipment: (value: Equipment) => void
-  staples: string[]; onSaveStaples: (names: string[]) => void; busy: boolean
+  staples: string[]; onSaveStaples: (names: string[]) => void; savedRecipes: SavedRecipe[]; pantry: PantryItem[]; busy: boolean
   onRefresh: () => void; onSelect: (recipe: Recipe) => void; onShowPantry: () => void
 }) {
   const [stapleInput, setStapleInput] = useState('')
+  // Re-matched against the fridge on every render (cheap: at most 50), so the marks follow pantry changes and the date.
+  const saved = rankSavedRecipes(savedRecipes, pantry, staples)
   const suggestions = STAPLE_SUGGESTIONS.filter((name) => !staples.includes(name))
   function addStaple(event: FormEvent) {
     event.preventDefault()
@@ -52,6 +55,17 @@ export function RecipesView({ recipes, loading, stale, source, message, budgetYe
         </div>
       </article>)}</div>
     {loading && <p className="loading-note" role="status">Geminiがレシピを考えています。混雑時は最大1分ほどかかります…</p>}
+    <section className="saved-recipes" aria-labelledby="saved-recipes-title">
+      <div className="saved-recipes-heading"><BookmarkCheck size={18} /><h2 id="saved-recipes-title">保存したレシピ</h2>{saved.length > 0 && <span className="saved-count">{saved.length}件</span>}</div>
+      {saved.length === 0 ? <p className="saved-empty">気に入ったレシピは「作り方を見る」から保存できます。保存したレシピはAIの提案回数を使わずに、いつでも今の冷蔵庫の中身と照らし合わせて作れます。</p>
+        : <><p className="saved-hint">今の冷蔵庫の中身で照らし合わせ、期限が近い食材を使えるものから並べています。</p>
+          <ul className="saved-list">{saved.map((recipe) => <li key={recipe.id}><button type="button" className="saved-row" onClick={() => onSelect(recipe)}>
+            <span className="saved-emoji">{recipe.emoji}</span>
+            <span className="saved-body"><strong>{recipe.name}</strong><small><Clock3 size={12} />{recipe.minutes}分{recipe.estimatedCostYen != null && <> · 約{recipe.estimatedCostYen}円</>} · {recipe.missingIngredients.length ? `買い足し${recipe.missingIngredients.length}品` : '食材がそろっています'}</small></span>
+            {recipe.usesExpiring > 0 && <span className="expiring-tag saved-expiring"><Flame size={12} />期限間近を活用</span>}
+            <ArrowRight size={15} className="saved-arrow" />
+          </button></li>)}</ul></>}
+    </section>
     <div className="recipe-footnote"><Sparkles size={15} /><span>{message || (source === 'gemini' ? 'Geminiが登録食材と期限、予算、調理時間をもとに提案しています。材料費は地域や購入店で変わる概算です。' : 'Gemini API未設定時は、アプリ内の節約レシピを表示します。')} {source === 'gemini' ? 'これはWebサイトのリアルタイム検索ではなく、Geminiによるレシピ生成です。食材名・数量・期限・設定はGoogleへ送信され、無料枠ではサービス改善に利用される場合があります。' : ''}</span></div>
   </>
 }

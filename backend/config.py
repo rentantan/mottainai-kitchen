@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.5.0"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 GEMINI_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "25"))
