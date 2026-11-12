@@ -385,3 +385,7 @@ body{background:radial-gradient(1200px 500px at 85% -10%,#eef5e8 0%,transparent 
 .form-optional>summary small{font-weight:500;color:#70756f;font-size:12px}
 .form-optional-body{display:flex;flex-direction:column;gap:12px;padding:0 12px 12px}
 .form-optional-body .price-hint{margin:-4px 0 0}
+.freezer-suggest{align-items:center;flex-wrap:wrap}
+.freezer-suggest button{margin-left:auto;border:1px solid #b9d2b6;background:#fff;color:#356c4c;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;white-space:nowrap}
+.suggest-buttons{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.suggest-buttons button{margin-left:0}

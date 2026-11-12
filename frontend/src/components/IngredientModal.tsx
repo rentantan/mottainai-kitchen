@@ -6,6 +6,7 @@ import { FREEZER_DAYS, categoryEmoji, categoryOptions, dateOffset } from '../dat
 import { findFoodPreset } from '../foodPresets'
 import type { FoodPreset } from '../foodPresets'
 import { useModal } from '../hooks/useModal'
+import { daysUntil } from '../utils'
 
 const UNIT_SUGGESTIONS = ['個', '本', '枚', '袋', 'パック', '丁', '玉', '束', '缶', '切れ', 'g', 'kg', 'ml', 'L']
 const EXPIRY_SHORTCUTS: { label: string; days: number }[] = [
@@ -48,11 +49,25 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
     if (!touched.has('category')) setCategory(next.category)
   }
 
+  /**
+   * The freezer checkbox only moves the date while it is still the automatic guess for a new item.
+   * A date typed or picked by hand, and the date of an item being edited, are never changed
+   * behind the user's back (an item frozen a month ago may rightly expire tomorrow, and a slip of
+   * the finger must not add another month). For food frozen just now, the freezer date is offered instead.
+   */
   function changeFrozen(value: boolean) {
     setFrozen(value)
-    // Frozen food keeps for about a month; follow that unless the date was set by hand.
-    if (!touched.has('expiryDate')) setExpiryDate(dateOffset(value ? FREEZER_DAYS : preset?.days ?? 3))
+    if (!item && !touched.has('expiryDate')) setExpiryDate(dateOffset(value ? FREEZER_DAYS : preset?.days ?? 3))
   }
+
+  function changeExpiry(value: string) {
+    setExpiryDate(value)
+    touch('expiryDate')
+  }
+
+  const freezerDate = dateOffset(FREEZER_DAYS)
+  // Only for food frozen just now in this form: "a month from today" makes sense then, not for older frozen food.
+  const offerFreezerDate = frozen && !item?.frozen && expiryDate !== '' && expiryDate !== freezerDate && daysUntil(expiryDate) < FREEZER_DAYS
 
   function submit(e: FormEvent) {
     e.preventDefault()
@@ -75,13 +90,14 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
       </div>
       <div className="form-label">
         <label htmlFor="ingredient-expiry">賞味・消費期限 <span>必須</span></label>
-        <input id="ingredient-expiry" type="date" value={expiryDate} onChange={(e) => { setExpiryDate(e.target.value); touch('expiryDate') }} />
+        <input id="ingredient-expiry" type="date" value={expiryDate} onChange={(e) => changeExpiry(e.target.value)} />
         <div className="expiry-shortcuts" role="group" aria-label="期限をすばやく選ぶ">{EXPIRY_SHORTCUTS.map((shortcut) => {
           const value = dateOffset(shortcut.days)
-          return <button type="button" key={shortcut.label} className={expiryDate === value ? 'selected' : ''} aria-pressed={expiryDate === value} onClick={() => { setExpiryDate(value); touch('expiryDate') }}>{shortcut.label}</button>
+          return <button type="button" key={shortcut.label} className={expiryDate === value ? 'selected' : ''} aria-pressed={expiryDate === value} onClick={() => changeExpiry(value)}>{shortcut.label}</button>
         })}</div>
       </div>
-      <label className="frozen-toggle"><input type="checkbox" checked={frozen} onChange={(e) => changeFrozen(e.target.checked)} /><span>❄️ 冷凍保存している<small>期限の目安が約1か月になります。使う前に解凍してください</small></span></label>
+      <label className="frozen-toggle"><input type="checkbox" checked={frozen} onChange={(e) => changeFrozen(e.target.checked)} /><span>❄️ 冷凍保存している<small>冷凍した日から約1か月が目安です。使う前に解凍してください</small></span></label>
+      {offerFreezerDate && <p className="preset-hint freezer-suggest" role="status">❄️ 今日冷凍するなら、目安は{formatShortDate(freezerDate)}ごろです<span className="suggest-buttons"><button type="button" onClick={() => changeExpiry(freezerDate)}>この日にする</button></span></p>}
       <label className="form-label">カテゴリ<select value={category} onChange={(e) => { setCategory(e.target.value as Category); touch('category') }}>{categoryOptions.map((option) => <option key={option} value={option}>{categoryEmoji[option]} {option}</option>)}</select></label>
       <details className="form-optional" open={Boolean(item?.priceYen != null || item?.note)}>
         <summary>値段・メモ <small>任意</small></summary>
@@ -95,4 +111,8 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
       <div className="modal-actions sticky-actions"><button type="button" className="cancel-button" onClick={onClose}>キャンセル</button><button type="submit" className="primary-button"><Check size={16} />{item ? '変更を保存' : '食材を追加'}</button></div>
     </form>
   </section></div>
+}
+
+function formatShortDate(isoDate: string) {
+  return new Date(`${isoDate}T00:00:00`).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })
 }
