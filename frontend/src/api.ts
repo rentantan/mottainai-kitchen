@@ -16,7 +16,7 @@ type ValidationDetail = { loc?: (string | number)[]; msg?: string }
 
 const FIELD_LABELS: Record<string, string> = {
   email: 'メールアドレス', password: 'パスワード', name: '食材名', quantity: '残量', unit: '単位',
-  expiryDate: '期限', category: 'カテゴリ', note: 'メモ', amount: '使った量', names: '名前',
+  expiryDate: '期限', category: 'カテゴリ', note: 'メモ', amount: '使った量', names: '名前', priceYen: '値段',
 }
 
 /** Turn FastAPI's `detail` (string or validation-error array) into a Japanese message. */

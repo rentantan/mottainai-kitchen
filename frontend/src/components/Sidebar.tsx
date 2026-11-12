@@ -19,6 +19,6 @@ export function Sidebar({ activeTab, onTab, pantryCount, shoppingCount, consumed
     <div className="side-mini-stat"><div className="mini-stat-icon green"><ShoppingBasket size={17} /></div><div><div className="mini-stat-value">{pantryCount} <small>品</small></div><div className="mini-stat-label">登録中の食材</div></div></div>
     <div className="side-mini-stat"><div className="mini-stat-icon orange"><Heart size={17} /></div><div><div className="mini-stat-value">{consumed} <small>品</small></div><div className="mini-stat-label">使い切った食材</div></div></div>
     <div className="side-mini-stat"><div className="mini-stat-icon red"><Trash2 size={17} /></div><div><div className="mini-stat-value">{wasted} <small>品</small></div><div className="mini-stat-label">今月捨てた食材</div></div></div>
-    <div className="sidebar-bottom"><div className="tip-card"><div className="tip-illustration">🌱</div><div className="tip-title">自炊はゆるく、<br />賢く続けよう。</div><div className="tip-copy">食費を抑えて、<br />食材も使い切ろう。</div></div><button className="side-link reset-link" onClick={onReset}><Settings2 size={17} /><span>サンプルに戻す</span></button><div className="sidebar-foot">ひとり暮らしの自炊を応援。</div></div>
+    <div className="sidebar-bottom"><div className="tip-card"><div className="tip-illustration">🌱</div><div className="tip-title">自炊はゆるく、<br />賢く続けよう。</div><div className="tip-copy">食費を抑えて、<br />食材も使い切ろう。</div></div><button className="side-link reset-link" onClick={onReset}><Settings2 size={17} /><span>サンプル食材を入れる</span></button><div className="sidebar-foot">ひとり暮らしの自炊を応援。</div></div>
   </aside>
 }

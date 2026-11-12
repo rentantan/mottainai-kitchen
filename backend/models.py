@@ -13,6 +13,7 @@ class PantryInput(BaseModel):
     unit: str = Field(default="個", max_length=20)
     expiry_date: date
     category: str = Field(default="その他", max_length=30)
+    frozen: bool = False
 
 
 class PantryItemWrite(BaseModel):
@@ -23,6 +24,11 @@ class PantryItemWrite(BaseModel):
     category: Category = "その他"
     emoji: str = Field(default="🛒", max_length=8)
     note: str = Field(default="", max_length=300)
+    frozen: bool = False
+    # Optional purchase price of the whole pack, used to show wasted food in yen.
+    priceYen: int | None = Field(default=None, ge=0, le=100000)
+    # Quantity when bought; the price applies to this amount. Defaults to quantity.
+    purchasedQuantity: float | None = Field(default=None, gt=0, le=100000)
 
 
 class RestoreRequest(BaseModel):
@@ -49,6 +55,8 @@ class BatchConsumeRequest(BaseModel):
 class RecipePreferences(BaseModel):
     budget_yen: Literal[300, 500, 700] = 500
     max_minutes: Literal[10, 20, 30] = 20
+    # "microwave": no stove (dorm rooms, one-burner kitchens) — microwave / kettle / rice cooker only.
+    equipment: Literal["any", "microwave"] = "any"
 
 
 class SuggestRequest(BaseModel):

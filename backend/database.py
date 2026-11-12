@@ -71,6 +71,12 @@ def init_database() -> None:
         pantry_columns = {row["name"] for row in connection.execute("PRAGMA table_info(pantry_items)")}
         if "user_id" not in pantry_columns:
             connection.execute("ALTER TABLE pantry_items ADD COLUMN user_id TEXT REFERENCES users(id)")
+        if "frozen" not in pantry_columns:
+            connection.execute("ALTER TABLE pantry_items ADD COLUMN frozen INTEGER NOT NULL DEFAULT 0")
+        if "price_yen" not in pantry_columns:
+            connection.execute("ALTER TABLE pantry_items ADD COLUMN price_yen INTEGER")
+        if "purchased_quantity" not in pantry_columns:
+            connection.execute("ALTER TABLE pantry_items ADD COLUMN purchased_quantity REAL")
         connection.execute(
             """CREATE TABLE IF NOT EXISTS app_state (
                 id INTEGER PRIMARY KEY,
@@ -158,6 +164,9 @@ def init_database() -> None:
             )
             """
         )
+        waste_columns = {row["name"] for row in connection.execute("PRAGMA table_info(waste_log)")}
+        if "value_yen" not in waste_columns:
+            connection.execute("ALTER TABLE waste_log ADD COLUMN value_yen INTEGER")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_waste_log_user_id ON waste_log(user_id, discarded_at)")
         connection.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (time.time(),))
         connection.execute(
@@ -191,7 +200,18 @@ def _db_item_to_api(row: sqlite3.Row) -> dict[str, Any]:
         "emoji": row["emoji"],
         "note": row["note"],
         "createdAt": row["created_at"],
+        "frozen": bool(row["frozen"]),
+        "priceYen": row["price_yen"],
+        "purchasedQuantity": row["purchased_quantity"],
     }
+
+
+def item_value_yen(row: sqlite3.Row) -> int | None:
+    """Yen value of what is left of an item: price × remaining / purchased quantity."""
+    if row["price_yen"] is None:
+        return None
+    purchased = row["purchased_quantity"] or row["quantity"]
+    return round(row["price_yen"] * min(1.0, row["quantity"] / purchased))
 
 
 def _read_pantry_state(connection: sqlite3.Connection, user_id: str) -> dict[str, Any]:
@@ -219,18 +239,22 @@ def _read_waste(connection: sqlite3.Connection, user_id: str) -> dict[str, Any]:
     ).fetchall()
     month_prefix = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y-%m")
     counts = connection.execute(
-        "SELECT COUNT(*) AS total, SUM(CASE WHEN substr(discarded_at, 1, 7) = ? THEN 1 ELSE 0 END) AS month "
+        "SELECT COUNT(*) AS total, SUM(CASE WHEN substr(discarded_at, 1, 7) = ? THEN 1 ELSE 0 END) AS month, "
+        "COALESCE(SUM(value_yen), 0) AS total_yen, "
+        "COALESCE(SUM(CASE WHEN substr(discarded_at, 1, 7) = ? THEN value_yen ELSE 0 END), 0) AS month_yen "
         "FROM waste_log WHERE user_id = ?",
-        (month_prefix, user_id),
+        (month_prefix, month_prefix, user_id),
     ).fetchone()
     return {
         "items": [{
             "id": row["id"], "name": row["name"], "quantity": row["quantity"], "unit": row["unit"],
             "category": row["category"], "emoji": row["emoji"], "expiryDate": row["expiry_date"],
-            "discardedAt": row["discarded_at"],
+            "discardedAt": row["discarded_at"], "valueYen": row["value_yen"],
         } for row in rows],
         "totalCount": int(counts["total"] or 0),
         "monthCount": int(counts["month"] or 0),
+        "totalYen": int(counts["total_yen"] or 0),
+        "monthYen": int(counts["month_yen"] or 0),
     }
 
 
@@ -240,10 +264,12 @@ def _insert_pantry_item(connection: sqlite3.Connection, item: PantryItemWrite, u
     created_at = created_at or datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()
     connection.execute(
         """INSERT INTO pantry_items
-           (id, name, quantity, unit, expiry_date, category, emoji, note, created_at, user_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (id, name, quantity, unit, expiry_date, category, emoji, note, created_at, user_id,
+            frozen, price_yen, purchased_quantity)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (item_id, item.name.strip(), item.quantity, item.unit, item.expiryDate.isoformat(),
-         item.category, item.emoji, item.note, created_at, user_id),
+         item.category, item.emoji, item.note, created_at, user_id,
+         int(item.frozen), item.priceYen, max(item.purchasedQuantity or 0, item.quantity)),
     )
     connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user_id,))
     row = connection.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,)).fetchone()

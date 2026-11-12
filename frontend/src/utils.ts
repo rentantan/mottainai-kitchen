@@ -1,5 +1,6 @@
 import type { PantryItem, Recipe } from './types'
 import { STORAGE_KEY, fallbackRecipes } from './data'
+import type { Equipment } from './data'
 
 export function daysUntil(dateString: string) {
   const today = new Date()
@@ -155,6 +156,6 @@ export function scoreRecipe(recipe: typeof fallbackRecipes[number], pantry: Pant
   const pct = Math.round((matched.length / recipe.ingredients.length) * 100)
   return { ...recipe, matchedIngredients: matched, missingIngredients: missing, usesExpiring: expiringMatches.length, nearestExpiryDays, expiryPriorityScore: priorityScore, matchPercent: pct }
 }
-export function getFallbackSuggestions(pantry: PantryItem[], staples: string[], budgetYen = 500, maxMinutes = 20): Recipe[] {
-  return fallbackRecipes.filter((recipe) => (recipe.estimatedCostYen ?? 9999) <= budgetYen && recipe.minutes <= maxMinutes).map((recipe) => scoreRecipe(recipe, pantry, staples)).sort((a, b) => (a.nearestExpiryDays ?? 999) - (b.nearestExpiryDays ?? 999) || (b.expiryPriorityScore ?? 0) - (a.expiryPriorityScore ?? 0) || b.usesExpiring - a.usesExpiring || b.matchPercent - a.matchPercent || (a.estimatedCostYen ?? 9999) - (b.estimatedCostYen ?? 9999)).slice(0, 3)
+export function getFallbackSuggestions(pantry: PantryItem[], staples: string[], budgetYen = 500, maxMinutes = 20, equipment: Equipment = 'any'): Recipe[] {
+  return fallbackRecipes.filter((recipe) => (recipe.estimatedCostYen ?? 9999) <= budgetYen && recipe.minutes <= maxMinutes && (equipment === 'any' || recipe.microwaveOnly)).map((recipe) => scoreRecipe(recipe, pantry, staples)).sort((a, b) => (a.nearestExpiryDays ?? 999) - (b.nearestExpiryDays ?? 999) || (b.expiryPriorityScore ?? 0) - (a.expiryPriorityScore ?? 0) || b.usesExpiring - a.usesExpiring || b.matchPercent - a.matchPercent || (a.estimatedCostYen ?? 9999) - (b.estimatedCostYen ?? 9999)).slice(0, 3)
 }

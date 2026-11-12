@@ -20,17 +20,17 @@ export function WastePanel({ waste, consumed }: { waste: WasteSummary; consumed:
   }, [waste.items])
 
   return <section className="waste-section" aria-labelledby="waste-title">
-    <div className="section-heading"><div><div className="section-title-with-icon"><div className="section-icon waste-icon"><Recycle size={19} /></div><h2 id="waste-title">もったいない記録</h2></div><p className="section-description">「捨てた」を選んで削除した食材を記録します。</p></div></div>
+    <div className="section-heading"><div><div className="section-title-with-icon"><div className="section-icon waste-icon"><Recycle size={19} /></div><h2 id="waste-title">もったいない記録</h2></div><p className="section-description">「捨てた」を選んで削除した食材を記録します。値段を登録した食材は金額でも記録します。</p></div></div>
     <div className="waste-card">
       <div className="waste-stats">
-        <div><span className="waste-stat-label">今月捨てた</span><strong>{waste.monthCount}<small>品</small></strong></div>
-        <div><span className="waste-stat-label">これまで</span><strong>{waste.totalCount}<small>品</small></strong></div>
+        <div><span className="waste-stat-label">今月捨てた</span><strong>{waste.monthCount}<small>品</small></strong>{(waste.monthYen ?? 0) > 0 && <span className="waste-stat-note waste-yen">約{waste.monthYen!.toLocaleString()}円分</span>}</div>
+        <div><span className="waste-stat-label">これまで</span><strong>{waste.totalCount}<small>品</small></strong>{(waste.totalYen ?? 0) > 0 && <span className="waste-stat-note waste-yen">約{waste.totalYen!.toLocaleString()}円分</span>}</div>
         <div><span className="waste-stat-label">使い切り率</span><strong>{useRate === null ? '—' : <>{useRate}<small>%</small></>}</strong><span className="waste-stat-note">使い切り{consumed}品 / 捨てた{waste.totalCount}品</span></div>
       </div>
-      {repeated && <p className="waste-tip"><Lightbulb size={15} />{repeated.emoji} {repeated.name}を最近{repeated.count}回捨てています。次は少なめに買うか、冷凍保存を試してみよう。</p>}
+      {repeated && <p className="waste-tip"><Lightbulb size={15} />{repeated.emoji} {repeated.name}を最近{repeated.count}回捨てています。次は少なめに買うか、期限が近づいたら冷蔵庫の一覧の ❄️ で冷凍してみよう。</p>}
       {waste.items.length ? <ul className="waste-list">{waste.items.slice(0, 5).map((entry) => <li key={entry.id}>
         <span className="waste-emoji">{entry.emoji}</span>
-        <span className="waste-name"><strong>{entry.name}</strong><small>{formatQuantity(entry.quantity)}{entry.unit} · 期限 {formatDate(entry.expiryDate)}</small></span>
+        <span className="waste-name"><strong>{entry.name}</strong><small>{formatQuantity(entry.quantity)}{entry.unit}{entry.valueYen != null && ` · 約${entry.valueYen}円`} · 期限 {formatDate(entry.expiryDate)}</small></span>
         <span className="waste-date"><Trash2 size={12} />{formatDate(entry.discardedAt.slice(0, 10))}</span>
       </li>)}</ul>
         : <p className="waste-empty">まだ捨てた食材はありません。この調子！🎉</p>}

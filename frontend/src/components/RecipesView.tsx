@@ -2,12 +2,14 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowRight, CheckCircle2, ChefHat, Clock3, Flame, Plus, Refrigerator, Sparkles, Wallet, X } from 'lucide-react'
 import type { Recipe } from '../types'
+import type { Equipment } from '../data'
 
 const STAPLE_SUGGESTIONS = ['しょうゆ', '塩', 'こしょう', '砂糖', 'サラダ油', 'みりん', '酒', '味噌', 'マヨネーズ', 'ケチャップ', 'ごま油', '酢']
 
-export function RecipesView({ recipes, loading, stale, source, message, budgetYen, onBudget, maxMinutes, onMaxMinutes, staples, onSaveStaples, busy, onRefresh, onSelect, onShowPantry }: {
+export function RecipesView({ recipes, loading, stale, source, message, budgetYen, onBudget, maxMinutes, onMaxMinutes, equipment, onEquipment, staples, onSaveStaples, busy, onRefresh, onSelect, onShowPantry }: {
   recipes: Recipe[]; loading: boolean; stale: boolean; source: 'gemini' | 'local'; message: string
   budgetYen: 300 | 500 | 700; onBudget: (value: 300 | 500 | 700) => void; maxMinutes: 10 | 20 | 30; onMaxMinutes: (value: 10 | 20 | 30) => void
+  equipment: Equipment; onEquipment: (value: Equipment) => void
   staples: string[]; onSaveStaples: (names: string[]) => void; busy: boolean
   onRefresh: () => void; onSelect: (recipe: Recipe) => void; onShowPantry: () => void
 }) {
@@ -29,6 +31,7 @@ export function RecipesView({ recipes, loading, stale, source, message, budgetYe
       <div className="student-preference-label"><span>🎓</span><div><strong>大学生の一人暮らし節約モード</strong><small>1人分・安い食材・少ない洗い物を優先</small></div></div>
       <label>1食の予算<select value={budgetYen} onChange={(event) => onBudget(Number(event.target.value) as 300 | 500 | 700)}><option value={300}>300円以内</option><option value={500}>500円以内</option><option value={700}>700円以内</option></select></label>
       <label>調理時間<select value={maxMinutes} onChange={(event) => onMaxMinutes(Number(event.target.value) as 10 | 20 | 30)}><option value={10}>10分以内</option><option value={20}>20分以内</option><option value={30}>30分以内</option></select></label>
+      <label>調理器具<select value={equipment} onChange={(event) => onEquipment(event.target.value as Equipment)}><option value="any">コンロ・レンジ</option><option value="microwave">電子レンジだけ</option></select></label>
       <div className="staples-editor">
         <div className="staples-heading"><strong>常備している調味料</strong><small>ここにある調味料は「買い足し」に数えません</small></div>
         <div className="staple-chips">
@@ -42,7 +45,7 @@ export function RecipesView({ recipes, loading, stale, source, message, budgetYe
       : recipes.map((recipe, index) => <article className={`recipe-card ${stale ? 'recipe-card-stale' : ''}`} key={recipe.id}>
         <div className={`recipe-art recipe-art-${recipe.id} recipe-tone-${index % 3}`}><span className="recipe-plate">{recipe.emoji}</span><span className="recipe-match"><CheckCircle2 size={14} /> 食材一致 {recipe.matchPercent}%</span></div>
         <div className="recipe-card-content">
-          <div className="recipe-tags"><span><Clock3 size={13} />{recipe.minutes}分</span><span><ChefHat size={13} />{recipe.difficulty}</span>{recipe.estimatedCostYen !== undefined && <span><Wallet size={13} />約{recipe.estimatedCostYen}円/人</span>}{recipe.usesExpiring > 0 && <span className="expiring-tag"><Flame size={12} />期限間近を活用</span>}</div>
+          <div className="recipe-tags"><span><Clock3 size={13} />{recipe.minutes}分</span><span><ChefHat size={13} />{recipe.difficulty}</span>{recipe.estimatedCostYen !== undefined && <span><Wallet size={13} />約{recipe.estimatedCostYen}円/人</span>}{recipe.usesExpiring > 0 && <span className="expiring-tag"><Flame size={12} />期限間近を活用</span>}{recipe.microwaveOnly && <span>レンジだけ</span>}</div>
           <h3>{recipe.name}</h3><p className="recipe-description">{recipe.description}</p>{recipe.source && <p className="recipe-source-label">提案元：{recipe.source}</p>}
           <div className="recipe-matched"><span className="matched-label">使える食材</span><div className="ingredient-tags">{recipe.matchedIngredients.length ? recipe.matchedIngredients.map((ingredient) => <span className="ingredient-tag" key={ingredient}>{ingredient}</span>) : <span className="ingredient-tag muted-tag">冷蔵庫の食材は使いません</span>}</div></div>
           <div className="recipe-card-bottom"><span className="missing-copy">{recipe.missingIngredients.length ? `あと${recipe.missingIngredients.length}品で完成` : '食材がそろっています！'}</span><button className="recipe-detail-button" onClick={() => onSelect(recipe)}>作り方を見る <ArrowRight size={15} /></button></div>

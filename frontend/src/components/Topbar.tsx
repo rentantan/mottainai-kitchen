@@ -31,7 +31,7 @@ export function Topbar({ activeTab, email, status, pantryCount, consumed, notifi
           <div className="profile-title"><span className="profile-avatar">🥑</span><span><strong>マイキッチン</strong><small>{email}</small></span></div>
           <div className="profile-stats"><span><strong>{pantryCount}</strong>登録中</span><span><strong>{consumed}</strong>使い切り</span></div>
           <div className="storage-status"><span className={`status-dot ${status === 'ready' ? 'is-online' : ''}`} />{status === 'ready' ? 'SQLiteに保存中' : status === 'loading' ? '読み込み中…' : 'オフライン（変更は保存されません）'}</div>
-          <button className="profile-reset" onClick={() => { setOpen(null); onReset() }}><Settings2 size={14} />サンプルに戻す</button>
+          <button className="profile-reset" onClick={() => { setOpen(null); onReset() }}><Settings2 size={14} />サンプル食材を入れる</button>
           <button className="profile-logout" onClick={onLogout}>ログアウト</button>
         </div>}
       </div>

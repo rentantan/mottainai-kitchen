@@ -86,6 +86,11 @@ describe('getFallbackSuggestions', () => {
     expect(recipes.length).toBeGreaterThan(0)
     expect(recipes.every((r) => r.minutes <= 10 && (r.estimatedCostYen ?? 0) <= 300)).toBe(true)
   })
+  it('only offers stove-free recipes in microwave mode', () => {
+    const recipes = getFallbackSuggestions([], [], 700, 30, 'microwave')
+    expect(recipes.length).toBeGreaterThan(0)
+    expect(recipes.every((r) => r.microwaveOnly)).toBe(true)
+  })
   it('never counts expired items as available', () => {
     const [top] = getFallbackSuggestions([item('鶏もも肉', -1, { unit: 'g', quantity: 200 })], [], 500, 20)
     expect(top.matchedIngredients).not.toContain('鶏肉')

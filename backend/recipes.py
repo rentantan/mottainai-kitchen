@@ -23,6 +23,7 @@ router = APIRouter(prefix="/api/recipes")
 
 # Fallback recipes keep the core app usable when the API key is not configured,
 # the free quota is temporarily exhausted, or the network is unavailable.
+# "microwaveOnly": cookable without a stove (shown in the 電子レンジだけ mode).
 FALLBACK_RECIPES: list[dict[str, Any]] = [
     {
         "id": "egg-fried-rice",
@@ -171,6 +172,42 @@ FALLBACK_RECIPES: list[dict[str, Any]] = [
             "ポン酢をかけていただく。",
         ],
         "estimatedCostYen": 200,
+        "microwaveOnly": True,
+    },
+    {
+        "id": "microwave-egg-don",
+        "name": "レンジで作るふわふわ卵丼",
+        "description": "コンロなしでOK。耐熱容器ひとつで作れる、朝にも夜にも使える丼。",
+        "minutes": 6,
+        "difficulty": "かんたん",
+        "emoji": "🥚",
+        "ingredients": ["ごはん", "卵", "めんつゆ"],
+        "ingredientDetails": ["ごはん 茶碗1杯", "卵 1個", "めんつゆ 大さじ1"],
+        "steps": [
+            "耐熱容器に卵を溶き、めんつゆと水大さじ1を混ぜる。",
+            "ふんわりラップをして600Wで1分加熱し、いったん取り出して混ぜる。",
+            "さらに30秒〜1分、卵に火が通って固まるまで加熱する。",
+            "温めたごはんにのせる。",
+        ],
+        "estimatedCostYen": 90,
+        "microwaveOnly": True,
+    },
+    {
+        "id": "microwave-cabbage-tuna",
+        "name": "キャベツとツナのレンジ蒸し",
+        "description": "キャベツを切ってのせてチンするだけ。余ったキャベツの消費に。",
+        "minutes": 6,
+        "difficulty": "かんたん",
+        "emoji": "🥬",
+        "ingredients": ["キャベツ", "ツナ缶", "ポン酢"],
+        "ingredientDetails": ["キャベツ 2枚", "ツナ缶 1/2缶", "ポン酢 大さじ1"],
+        "steps": [
+            "キャベツをざく切りにして耐熱皿に広げる。",
+            "油を軽く切ったツナをのせ、ふんわりラップをして600Wで3分加熱する。",
+            "ポン酢をかけて全体を混ぜる。",
+        ],
+        "estimatedCostYen": 150,
+        "microwaveOnly": True,
     },
     {
         "id": "carrot-kinpira",
@@ -312,6 +349,7 @@ def _expiry_context(item: PantryInput, today: date) -> dict[str, Any]:
         "expiry_date": item.expiry_date.isoformat(),
         "expiry_status": status,
         "days_until_expiry": days_left,
+        **({"storage": "冷凍保存中（使う前に解凍が必要。解凍の手間も調理時間に含める）"} if item.frozen else {}),
     }
 
 
@@ -321,6 +359,9 @@ def _build_prompt(request: SuggestRequest, staples: list[str]) -> str:
     usable = [row for row in pantry_context if row["days_until_expiry"] >= 0]
     expired = [row for row in pantry_context if row["days_until_expiry"] < 0]
     prefs = request.preferences
+    equipment = ("- コンロ・フライパン・鍋は使わない。電子レンジ（と電気ケトル・炊飯器）だけで作れる手順にする。耐熱容器とラップで作れるものにする。"
+                 if prefs.equipment == "microwave"
+                 else "- フライパン、鍋、電子レンジ程度で作れる。一口コンロや狭いキッチンでも作りやすく、特殊な調理器具は使わない。")
     avoid = ""
     if request.exclude_recipe_names:
         avoid = f"""
@@ -337,7 +378,7 @@ def _build_prompt(request: SuggestRequest, staples: list[str]) -> str:
 - 必ず1人分（servings=1）を想定する。
 - 1食の食材費の目安は税込・概算で {prefs.budget_yen} 円以内を目指す。高価な食材は使わない。
 - 調理時間は準備と加熱を含めて {prefs.max_minutes} 分以内を目指す。
-- フライパン、鍋、電子レンジ程度で作れる。一口コンロや狭いキッチンでも作りやすく、特殊な調理器具は使わない。
+{equipment}
 - 洗い物が少なく、スーパーやコンビニで少量を買いやすい食材を優先する。
 - 調味料を大量に買いそろえなくてよいレシピにする。
 - ごはん、卵、豆腐、もやし、納豆、冷凍野菜、ツナ缶、パスタ、うどん等の安価な食材を活用する。
@@ -567,6 +608,8 @@ def _format_fallback(pantry: list[PantryInput], preferences: RecipePreferences, 
     today = today_japan()
     recipes: list[dict[str, Any]] = []
     for recipe in FALLBACK_RECIPES:
+        if preferences.equipment == "microwave" and not recipe.get("microwaveOnly"):
+            continue
         if recipe["minutes"] > preferences.max_minutes:
             continue
         if recipe["estimatedCostYen"] > preferences.budget_yen:

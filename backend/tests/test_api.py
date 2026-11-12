@@ -75,6 +75,8 @@ def test_frontend_fallback_recipes_match_backend():
     frontend = re.findall(r"\{ id: '([^']+)', name: '([^']+)'.*?minutes: (\d+).*?estimatedCostYen: (\d+)", data_ts)
     backend = [(r["id"], r["name"], str(r["minutes"]), str(r["estimatedCostYen"])) for r in FALLBACK_RECIPES]
     assert sorted(frontend) == sorted(backend)
+    frontend_microwave = set(re.findall(r"\{ id: '([^']+)'[^\n]*microwaveOnly: true", data_ts))
+    assert frontend_microwave == {r["id"] for r in FALLBACK_RECIPES if r.get("microwaveOnly")}
 
 
 def test_discard_is_logged_and_undo_restores_item(client, make_user):
@@ -118,3 +120,45 @@ def test_invalid_delete_reason_is_rejected(client, make_user):
     _, headers = make_user()
     created = client.post("/api/pantry", json=_item("卵", 3), headers=headers).json()
     assert client.delete(f"/api/pantry/{created['id']}?reason=whatever", headers=headers).status_code == 422
+
+
+def test_frozen_flag_and_price_round_trip(client, make_user):
+    _, headers = make_user()
+    created = client.post("/api/pantry", json={**_item("鶏もも肉", 2, quantity=300, unit="g"), "priceYen": 450},
+                          headers=headers).json()
+    assert created["frozen"] is False and created["priceYen"] == 450 and created["purchasedQuantity"] == 300
+    write = {key: created[key] for key in ("name", "quantity", "unit", "expiryDate", "category", "emoji", "note", "priceYen")}
+    frozen = client.put(f"/api/pantry/{created['id']}", json={**write, "frozen": True}, headers=headers).json()
+    assert frozen["frozen"] is True and frozen["purchasedQuantity"] == 300
+
+
+def test_discarded_value_is_proportional_to_what_was_left(client, make_user):
+    _, headers = make_user()
+    created = client.post("/api/pantry", json={**_item("鶏もも肉", -1, quantity=300, unit="g"), "priceYen": 450},
+                          headers=headers).json()
+    client.post(f"/api/pantry/{created['id']}/consume", json={"amount": 200}, headers=headers)
+    waste = client.delete(f"/api/pantry/{created['id']}?reason=discarded", headers=headers).json()["waste"]
+    assert waste["items"][0]["valueYen"] == 150
+    assert waste["monthYen"] == 150 and waste["totalYen"] == 150
+    # Items without a price are counted but add no yen.
+    other = client.post("/api/pantry", json=_item("豆腐", -1, unit="丁"), headers=headers).json()
+    waste = client.delete(f"/api/pantry/{other['id']}?reason=discarded", headers=headers).json()["waste"]
+    assert waste["monthCount"] == 2 and waste["monthYen"] == 150
+
+
+def test_microwave_mode_only_returns_stove_free_recipes(client, make_user):
+    _, headers = make_user()
+    data = client.post("/api/recipes/suggest", json={"pantry": [], "preferences": {"budget_yen": 700, "max_minutes": 30, "equipment": "microwave"}},
+                       headers=headers).json()
+    microwave_ids = {r["id"] for r in FALLBACK_RECIPES if r.get("microwaveOnly")}
+    assert data["recipes"] and {r["id"] for r in data["recipes"]} <= microwave_ids
+
+
+def test_frozen_items_are_flagged_in_prompt():
+    from models import SuggestRequest
+    from recipes import _build_prompt
+    request = SuggestRequest(pantry=[{"name": "ごはん", "quantity": 2, "unit": "杯", "category": "主食・麺",
+                                      "expiry_date": (today_japan() + timedelta(days=30)).isoformat(), "frozen": True}],
+                             preferences={"equipment": "microwave"})
+    prompt = _build_prompt(request, [])
+    assert "冷凍保存中" in prompt and "電子レンジ（と電気ケトル・炊飯器）だけ" in prompt

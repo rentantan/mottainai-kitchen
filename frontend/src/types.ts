@@ -9,6 +9,11 @@ export type PantryItem = {
   emoji: string
   note: string
   createdAt: string
+  /** Stored in the freezer (expiry was extended when frozen). Missing in old offline caches. */
+  frozen?: boolean
+  /** Optional purchase price of the pack, for showing wasted food in yen. */
+  priceYen?: number | null
+  purchasedQuantity?: number | null
 }
 export type Recipe = {
   id: string
@@ -31,6 +36,7 @@ export type Recipe = {
   servings?: number
   expiryPriorityScore?: number
   nearestExpiryDays?: number
+  microwaveOnly?: boolean
 }
 
 export type ShoppingItem = {
@@ -48,7 +54,8 @@ export type WasteEntry = {
   emoji: string
   expiryDate: string
   discardedAt: string
+  valueYen?: number | null
 }
 /** Discarded food ("もったいない記録"): recent entries plus all-time / this-month counts. */
-export type WasteSummary = { items: WasteEntry[]; totalCount: number; monthCount: number }
+export type WasteSummary = { items: WasteEntry[]; totalCount: number; monthCount: number; totalYen?: number; monthYen?: number }
 export type PantryState = { items: PantryItem[]; consumedCount: number; initialized: boolean; waste: WasteSummary }

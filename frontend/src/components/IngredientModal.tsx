@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Check, Sparkles, X } from 'lucide-react'
 import type { Category, PantryItem } from '../types'
-import { categoryEmoji, categoryOptions, dateOffset } from '../data'
+import { FREEZER_DAYS, categoryEmoji, categoryOptions, dateOffset } from '../data'
 import { findFoodPreset } from '../foodPresets'
 import type { FoodPreset } from '../foodPresets'
 import { useDismiss } from '../hooks/useDismiss'
@@ -25,6 +25,8 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
   // Fields the user changed by hand are never overwritten by the name-based guess.
   const [touched, setTouched] = useState<ReadonlySet<Field>>(() => new Set())
   const [note, setNote] = useState(item?.note ?? '')
+  const [frozen, setFrozen] = useState(item?.frozen ?? false)
+  const [price, setPrice] = useState(item?.priceYen != null ? String(item.priceYen) : '')
   const [validation, setValidation] = useState('')
   useDismiss(true, onClose)
 
@@ -42,8 +44,14 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
     setPreset(next)
     if (!next) return
     if (!touched.has('unit')) setUnit(next.unit)
-    if (!touched.has('expiryDate')) setExpiryDate(dateOffset(next.days))
+    if (!touched.has('expiryDate')) setExpiryDate(dateOffset(frozen ? FREEZER_DAYS : next.days))
     if (!touched.has('category')) setCategory(next.category)
+  }
+
+  function changeFrozen(value: boolean) {
+    setFrozen(value)
+    // Frozen food keeps for about a month; follow that unless the date was set by hand.
+    if (!touched.has('expiryDate')) setExpiryDate(dateOffset(value ? FREEZER_DAYS : preset?.days ?? 3))
   }
 
   function submit(e: FormEvent) {
@@ -52,7 +60,9 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
     if (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0) { setValidation('残量は0より大きい数字にしてください。'); return }
     if (!unit.trim()) { setValidation('単位を入力してください。'); return }
     if (!expiryDate) { setValidation('期限を入力してください。'); return }
-    onSave({ name: name.trim(), quantity: Number(quantity), unit: unit.trim(), expiryDate, category, emoji, note: note.trim() })
+    const priceYen = price.trim() === '' ? null : Number(price)
+    if (priceYen !== null && !(Number.isInteger(priceYen) && priceYen >= 0 && priceYen <= 100000)) { setValidation('値段は0〜100000の整数（円）で入力してください。'); return }
+    onSave({ name: name.trim(), quantity: Number(quantity), unit: unit.trim(), expiryDate, category, emoji, note: note.trim(), frozen, priceYen })
   }
   return <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}><section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="ingredient-modal-title">
     <div className="modal-header"><div><div className="modal-eyebrow">YOUR PANTRY</div><h2 id="ingredient-modal-title">{item ? '食材を編集' : '食材を追加'}</h2><p>食材の情報を入力してください。</p></div><button className="modal-close" onClick={onClose} aria-label="閉じる"><X size={19} /></button></div>
@@ -71,7 +81,12 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
           return <button type="button" key={shortcut.label} className={expiryDate === value ? 'selected' : ''} aria-pressed={expiryDate === value} onClick={() => { setExpiryDate(value); touch('expiryDate') }}>{shortcut.label}</button>
         })}</div>
       </div>
+      <label className="frozen-toggle"><input type="checkbox" checked={frozen} onChange={(e) => changeFrozen(e.target.checked)} /><span>❄️ 冷凍保存している<small>期限の目安が約1か月になります。使う前に解凍してください</small></span></label>
+      <div className="form-two-col">
       <label className="form-label">カテゴリ<select value={category} onChange={(e) => { setCategory(e.target.value as Category); touch('category') }}>{categoryOptions.map((option) => <option key={option} value={option}>{categoryEmoji[option]} {option}</option>)}</select></label>
+      <label className="form-label">値段 <small>任意・円</small><input type="number" inputMode="numeric" min="0" max={100000} step="1" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="例：198" /></label>
+      </div>
+      <p className="price-hint">値段を入れておくと、捨ててしまったときに「もったいない記録」へ金額で残ります。</p>
       <label className="form-label">メモ <small>任意・300文字まで</small><textarea rows={2} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="例：開封済み、冷凍保存中..." /></label>
       {validation && <div className="form-error" role="alert">{validation}</div>}
       <div className="modal-actions"><button type="button" className="cancel-button" onClick={onClose}>キャンセル</button><button type="submit" className="primary-button"><Check size={16} />{item ? '変更を保存' : '食材を追加'}</button></div>

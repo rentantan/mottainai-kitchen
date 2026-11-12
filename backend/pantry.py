@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from database import (_current_user, _db_item_to_api, _ensure_user_state, _insert_pantry_item,
-                      _read_pantry_state, _read_waste, db_connection)
+                      _read_pantry_state, _read_waste, db_connection, item_value_yen)
 from models import BatchConsumeRequest, ConsumeRequest, PantryItemWrite, RestoreRequest
 
 router = APIRouter(prefix="/api/pantry")
@@ -73,12 +73,17 @@ def consume_batch(payload: BatchConsumeRequest, request: Request) -> dict[str, A
 def update_pantry_item(item_id: str, payload: PantryItemWrite, request: Request) -> dict[str, Any]:
     user = _current_user(request)
     with db_connection() as connection:
+        # purchased_quantity only grows: editing the remaining amount down must not
+        # change what the price was paid for.
         result = connection.execute(
             """UPDATE pantry_items
-               SET name = ?, quantity = ?, unit = ?, expiry_date = ?, category = ?, emoji = ?, note = ?
+               SET name = ?, quantity = ?, unit = ?, expiry_date = ?, category = ?, emoji = ?, note = ?,
+                   frozen = ?, price_yen = ?,
+                   purchased_quantity = MAX(COALESCE(purchased_quantity, 0), ?, COALESCE(?, 0))
                WHERE id = ? AND user_id = ?""",
             (payload.name.strip(), payload.quantity, payload.unit, payload.expiryDate.isoformat(),
-             payload.category, payload.emoji, payload.note, item_id, user["id"]),
+             payload.category, payload.emoji, payload.note, int(payload.frozen), payload.priceYen,
+             payload.quantity, payload.purchasedQuantity, item_id, user["id"]),
         )
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="食材が見つかりません")
@@ -101,10 +106,10 @@ def delete_pantry_item(item_id: str, request: Request, reason: Literal["removed"
         if reason == "discarded":
             waste_id = str(uuid.uuid4())
             connection.execute(
-                """INSERT INTO waste_log (id, user_id, name, quantity, unit, category, emoji, expiry_date, discarded_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO waste_log (id, user_id, name, quantity, unit, category, emoji, expiry_date, discarded_at, value_yen)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (waste_id, user["id"], row["name"], row["quantity"], row["unit"], row["category"], row["emoji"],
-                 row["expiry_date"], datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()),
+                 row["expiry_date"], datetime.now(ZoneInfo("Asia/Tokyo")).isoformat(), item_value_yen(row)),
             )
         return {"deleted": True, "item": _db_item_to_api(row), "wasteId": waste_id, "waste": _read_waste(connection, user["id"])}
 
