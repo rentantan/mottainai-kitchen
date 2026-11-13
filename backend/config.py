@@ -22,7 +22,7 @@ MAX_REQUESTS_PER_DAY_PER_USER = int(os.getenv("GEMINI_MAX_REQUESTS_PER_DAY_PER_U
 MAX_REQUESTS_PER_HOUR_PER_USER = int(os.getenv(
     "GEMINI_MAX_REQUESTS_PER_HOUR_PER_USER", os.getenv("GEMINI_MAX_REQUESTS_PER_HOUR_PER_IP", "3")))
 MIN_REQUEST_INTERVAL_SECONDS = float(os.getenv("GEMINI_MIN_REQUEST_INTERVAL_SECONDS", "20"))
-PROMPT_VERSION = "student-recipe-v7"  # bump when prompt or ingredient matching changes (invalidates cache)
+PROMPT_VERSION = "student-recipe-v8"  # bump when prompt or ingredient matching changes (invalidates cache)
 _BACKEND_DIR = Path(__file__).resolve().parent
 
 

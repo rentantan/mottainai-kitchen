@@ -77,7 +77,7 @@ describe('pantryMatchesFor', () => {
 describe('getFallbackSuggestions', () => {
   it('puts recipes using the most urgent item first', () => {
     const pantry = [item('ほうれん草', 0, { unit: '袋' }), item('卵', 3), item('にんじん', 7, { unit: '本' })]
-    const [top] = getFallbackSuggestions(pantry, ['しょうゆ'], 500, 20)
+    const [top] = getFallbackSuggestions(pantry, ['しょうゆ', 'サラダ油'], 500, 20)
     expect(top.ingredients).toContain('ほうれん草')
     expect(top.missingIngredients).toEqual([])
   })
