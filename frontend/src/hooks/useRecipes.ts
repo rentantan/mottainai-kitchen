@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { PantryItem, Recipe } from '../types'
-import type { Equipment } from '../data'
-import type { DataStatus } from '../Kitchen'
-import { FRONTEND_TIMEOUT_MS } from '../api'
-import { getFallbackSuggestions, scoreRecipe } from '../utils'
+import type { DataStatus, Equipment, PantryItem, Recipe } from '../types'
+import { FRONTEND_TIMEOUT_MS } from '../lib/api'
+import { PREFS_KEY } from '../lib/config'
+import { getFallbackSuggestions, scoreRecipe } from '../lib/recipes'
 
 export type Budget = 300 | 500 | 700
 export type Minutes = 10 | 20 | 30
@@ -11,7 +10,6 @@ type Call = <T>(path: string, options?: { method?: string; body?: unknown; timeo
 type SuggestResponse = { recipes?: Recipe[]; source?: 'gemini' | 'local'; message?: string }
 type Preferences = { budgetYen: Budget; maxMinutes: Minutes; equipment: Equipment }
 
-export const PREFS_KEY = 'mottainai-kitchen-recipe-prefs-v1'
 const DEFAULT_PREFS: Preferences = { budgetYen: 500, maxMinutes: 20, equipment: 'any' }
 
 /** The conditions picked last time on this device (per account), so a student without a stove picks "レンジだけ" once. */

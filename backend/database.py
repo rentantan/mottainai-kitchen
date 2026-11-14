@@ -1,22 +1,14 @@
+"""SQLite connection and schema migrations."""
 from __future__ import annotations
 
-import hashlib
-import hmac
-import secrets
 import sqlite3
 import time
-import uuid
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Callable
-from zoneinfo import ZoneInfo
-
-from fastapi import Depends, HTTPException, Security
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from typing import Callable
 
 from config import DATABASE_PATH
-from models import PantryItemWrite
+
 
 @contextmanager
 def db_connection(immediate: bool = False):
@@ -260,158 +252,3 @@ def init_database() -> None:
             # Same transaction as the migration: a failure rolls back both.
             connection.execute(f"PRAGMA user_version = {version}")
         connection.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (time.time(),))
-
-def _db_item_to_api(row: sqlite3.Row) -> dict[str, Any]:
-    return {
-        "id": row["id"],
-        "name": row["name"],
-        "quantity": row["quantity"],
-        "unit": row["unit"],
-        "expiryDate": row["expiry_date"],
-        "category": row["category"],
-        "emoji": row["emoji"],
-        "note": row["note"],
-        "createdAt": row["created_at"],
-        "frozen": bool(row["frozen"]),
-        "priceYen": row["price_yen"],
-        "purchasedQuantity": row["purchased_quantity"],
-    }
-
-
-def item_value_yen(row: sqlite3.Row) -> int | None:
-    """Yen value of what is left of an item: price × remaining / purchased quantity."""
-    if row["price_yen"] is None:
-        return None
-    purchased = row["purchased_quantity"] or row["quantity"]
-    return round(row["price_yen"] * min(1.0, row["quantity"] / purchased))
-
-
-def _read_pantry_state(connection: sqlite3.Connection, user_id: str) -> dict[str, Any]:
-    rows = connection.execute(
-        "SELECT * FROM pantry_items WHERE user_id = ? ORDER BY expiry_date ASC, created_at DESC", (user_id,)
-    ).fetchall()
-    state = connection.execute(
-        "SELECT consumed_count, initialized FROM app_state WHERE user_id = ?", (user_id,)
-    ).fetchone()
-    return {
-        "items": [_db_item_to_api(row) for row in rows],
-        "consumedCount": int(state["consumed_count"] if state else 0),
-        "initialized": bool(state["initialized"] if state else False),
-        "waste": _read_waste(connection, user_id),
-    }
-
-
-WASTE_RECENT_LIMIT = 20
-
-
-def _read_waste(connection: sqlite3.Connection, user_id: str) -> dict[str, Any]:
-    """Discarded-food summary: the most recent entries plus all-time and this-month counts."""
-    rows = connection.execute(
-        "SELECT * FROM waste_log WHERE user_id = ? ORDER BY discarded_at DESC LIMIT ?", (user_id, WASTE_RECENT_LIMIT)
-    ).fetchall()
-    month_prefix = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y-%m")
-    counts = connection.execute(
-        "SELECT COUNT(*) AS total, SUM(CASE WHEN substr(discarded_at, 1, 7) = ? THEN 1 ELSE 0 END) AS month, "
-        "COALESCE(SUM(value_yen), 0) AS total_yen, "
-        "COALESCE(SUM(CASE WHEN substr(discarded_at, 1, 7) = ? THEN value_yen ELSE 0 END), 0) AS month_yen "
-        "FROM waste_log WHERE user_id = ?",
-        (month_prefix, month_prefix, user_id),
-    ).fetchone()
-    used_up = connection.execute(
-        "SELECT COUNT(*) AS month FROM consume_log WHERE user_id = ? AND used_up = 1 AND substr(consumed_at, 1, 7) = ?",
-        (user_id, month_prefix),
-    ).fetchone()
-    return {
-        "items": [{
-            "id": row["id"], "name": row["name"], "quantity": row["quantity"], "unit": row["unit"],
-            "category": row["category"], "emoji": row["emoji"], "expiryDate": row["expiry_date"],
-            "discardedAt": row["discarded_at"], "valueYen": row["value_yen"],
-        } for row in rows],
-        "totalCount": int(counts["total"] or 0),
-        "monthCount": int(counts["month"] or 0),
-        "totalYen": int(counts["total_yen"] or 0),
-        "monthYen": int(counts["month_yen"] or 0),
-        # Items used up this month (from consume_log), for this month's use-up rate.
-        "monthUsedUp": int(used_up["month"] or 0),
-    }
-
-
-def _insert_pantry_item(connection: sqlite3.Connection, item: PantryItemWrite, user_id: str,
-                        created_at: str | None = None) -> dict[str, Any]:
-    item_id = str(uuid.uuid4())
-    created_at = created_at or datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()
-    connection.execute(
-        """INSERT INTO pantry_items
-           (id, name, quantity, unit, expiry_date, category, emoji, note, created_at, user_id,
-            frozen, price_yen, purchased_quantity)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (item_id, item.name.strip(), item.quantity, item.unit, item.expiryDate.isoformat(),
-         item.category, item.emoji, item.note, created_at, user_id,
-         int(item.frozen), item.priceYen, max(item.purchasedQuantity or 0, item.quantity)),
-    )
-    connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user_id,))
-    row = connection.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,)).fetchone()
-    return _db_item_to_api(row)
-
-
-def _read_staples(connection: sqlite3.Connection, user_id: str) -> list[str]:
-    rows = connection.execute(
-        "SELECT name FROM pantry_staples WHERE user_id = ? ORDER BY name", (user_id,)
-    ).fetchall()
-    return [row["name"] for row in rows]
-
-
-def _password_hash(password: str, salt: bytes | None = None) -> str:
-    actual_salt = salt or secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), actual_salt, 210_000)
-    return f"{actual_salt.hex()}:{digest.hex()}"
-
-
-def _verify_password(password: str, stored_hash: str) -> bool:
-    try:
-        salt_hex, digest_hex = stored_hash.split(":", 1)
-        expected = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt_hex), 210_000)
-        return hmac.compare_digest(expected.hex(), digest_hex)
-    except (ValueError, TypeError):
-        return False
-
-
-def _token_hash(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
-# auto_error=False: a missing token gets this app's Japanese 401 message, not FastAPI's default.
-# Declared with Security so /docs shows the lock icon and an "Authorize" button.
-_bearer_scheme = HTTPBearer(auto_error=False, description="ログイン・新規登録で受け取ったトークン")
-
-
-def current_user(credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme)) -> sqlite3.Row:
-    """Dependency: the logged-in user (id, email). Raises 401 without a valid session."""
-    token = credentials.credentials.strip() if credentials else ""
-    if not token:
-        raise HTTPException(status_code=401, detail="ログインが必要です")
-    with db_connection() as connection:
-        row = connection.execute(
-            """
-            SELECT users.id, users.email FROM auth_sessions
-            JOIN users ON users.id = auth_sessions.user_id
-            WHERE auth_sessions.token_hash = ? AND auth_sessions.expires_at > ?
-            """,
-            (_token_hash(token), time.time()),
-        ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=401, detail="ログインの有効期限が切れています")
-    return row
-
-
-# Use as a handler parameter (`user: CurrentUser`) on every endpoint that needs a login.
-CurrentUser = Annotated[sqlite3.Row, Depends(current_user)]
-
-
-def _ensure_user_state(connection: sqlite3.Connection, user_id: str) -> None:
-    connection.execute(
-        "INSERT OR IGNORE INTO app_state (id, consumed_count, initialized, user_id) "
-        "VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM app_state), 0, 0, ?)",
-        (user_id,),
-    )
-

@@ -1,5 +1,5 @@
-import type { Category } from './types'
-import { normalize } from './utils'
+import type { Category } from '../types'
+import { normalize } from './ingredients'
 
 /** Typical values for common groceries, used to pre-fill the add form. `days` is a rough shelf life after purchase. */
 export type FoodPreset = { category: Category; emoji: string; unit: string; days: number }

@@ -1,4 +1,4 @@
-import { API_BASE } from './data'
+import { API_BASE } from './config'
 
 // Backend caps one recipe request (incl. Gemini retries) at GEMINI_TOTAL_DEADLINE_SECONDS (45s).
 // Keep this longer so the browser never gives up while the backend is still working.

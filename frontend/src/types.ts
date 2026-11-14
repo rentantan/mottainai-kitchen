@@ -67,3 +67,9 @@ export type WasteEntry = {
 /** Discarded food ("もったいない記録"): recent entries plus all-time / this-month counts. */
 export type WasteSummary = { items: WasteEntry[]; totalCount: number; monthCount: number; totalYen?: number; monthYen?: number; monthUsedUp?: number }
 export type PantryState = { items: PantryItem[]; consumedCount: number; initialized: boolean; waste: WasteSummary }
+
+export type Equipment = 'any' | 'microwave'
+export type Tab = 'pantry' | 'recipes' | 'shopping'
+export type PantryFilter = 'all' | 'urgent' | 'expired'
+/** loading: first fetch in progress / ready: in sync with SQLite / offline: showing the last cached snapshot. */
+export type DataStatus = 'loading' | 'ready' | 'offline'

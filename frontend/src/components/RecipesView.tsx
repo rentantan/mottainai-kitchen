@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowRight, BookmarkCheck, CheckCircle2, ChefHat, ChevronDown, Clock3, Flame, Plus, Refrigerator, Sparkles, Wallet, X } from 'lucide-react'
-import type { PantryItem, Recipe, SavedRecipe } from '../types'
-import { daysUntil, rankSavedRecipes } from '../utils'
-import type { Equipment } from '../data'
+import type { Equipment, PantryItem, Recipe, SavedRecipe } from '../types'
+import { daysUntil } from '../lib/dates'
+import { rankSavedRecipes } from '../lib/recipes'
 
 /** "今日" / "昨日" / "3日前" / "11/2" for the last time a saved recipe was cooked. */
 function lastCookedText(iso: string) {

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 
-from database import CurrentUser, _ensure_user_state, _insert_pantry_item, _read_staples, db_connection
+from clock import now_japan, now_japan_iso
+from database import db_connection
+from security import CurrentUser
+from store import ensure_user_state, insert_pantry_item, read_staples
 from ingredients import matches_name
 from models import ShoppingItemCreate, ShoppingItemUpdate, StaplesWrite, StockFromShoppingRequest
 
@@ -44,7 +46,7 @@ MAX_RESTOCK_SUGGESTIONS = 8
 def restock_suggestions(user: CurrentUser) -> dict[str, list[str]]:
     """Foods used up recently ("使い切った"), newest first, one name per food (卵 / たまご count
     once). The client hides the ones already in the fridge or on the list."""
-    since = (datetime.now(ZoneInfo("Asia/Tokyo")) - timedelta(days=RESTOCK_DAYS)).isoformat()
+    since = (now_japan() - timedelta(days=RESTOCK_DAYS)).isoformat()
     with db_connection() as connection:
         rows = connection.execute(
             "SELECT name FROM consume_log WHERE user_id = ? AND used_up = 1 AND consumed_at >= ? ORDER BY consumed_at DESC LIMIT 200",
@@ -78,7 +80,7 @@ def add_shopping(payload: ShoppingItemCreate, user: CurrentUser) -> dict[str, An
                 new_names.append(name)
         if count + len(new_names) > MAX_SHOPPING_ITEMS:
             raise HTTPException(status_code=400, detail=f"買い物リストは{MAX_SHOPPING_ITEMS}件までです")
-        now = datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()
+        now = now_japan_iso()
         for name in new_names:
             connection.execute(
                 "INSERT INTO shopping_items (id, user_id, name, checked, created_at) VALUES (?, ?, ?, 0, ?)",
@@ -104,7 +106,7 @@ def stock_from_shopping(payload: StockFromShoppingRequest, user: CurrentUser) ->
     """Put bought items into the fridge and tick them off, in one transaction. Items ticked
     in the shop can be registered too; rows deleted meanwhile are skipped."""
     with db_connection(immediate=True) as connection:
-        _ensure_user_state(connection, user["id"])
+        ensure_user_state(connection, user["id"])
         added: list[dict[str, Any]] = []
         for entry in payload.entries:
             result = connection.execute(
@@ -112,7 +114,7 @@ def stock_from_shopping(payload: StockFromShoppingRequest, user: CurrentUser) ->
                 (entry.shoppingId, user["id"]),
             )
             if result.rowcount:
-                added.append(_insert_pantry_item(connection, entry.item, user["id"]))
+                added.append(insert_pantry_item(connection, entry.item, user["id"]))
         return {"added": added, "items": _read_shopping(connection, user["id"])}
 
 
@@ -133,7 +135,7 @@ def delete_shopping(item_id: str, user: CurrentUser) -> dict[str, Any]:
 @router.get("/staples")
 def get_staples(user: CurrentUser) -> dict[str, list[str]]:
     with db_connection() as connection:
-        return {"names": _read_staples(connection, user["id"])}
+        return {"names": read_staples(connection, user["id"])}
 
 
 @router.put("/staples")
@@ -144,4 +146,4 @@ def put_staples(payload: StaplesWrite, user: CurrentUser) -> dict[str, list[str]
         connection.executemany(
             "INSERT INTO pantry_staples (user_id, name) VALUES (?, ?)", [(user["id"], name) for name in names]
         )
-        return {"names": _read_staples(connection, user["id"])}
+        return {"names": read_staples(connection, user["id"])}

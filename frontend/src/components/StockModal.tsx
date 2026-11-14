@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { Refrigerator, X } from 'lucide-react'
 import type { PantryItem, ShoppingItem } from '../types'
-import { dateOffset } from '../data'
-import { findFoodPreset } from '../foodPresets'
-import { daysUntil, expiryText } from '../utils'
+import { dateOffset, daysUntil, expiryText } from '../lib/dates'
+import { findFoodPreset } from '../lib/foodPresets'
 import { useModal } from '../hooks/useModal'
 
 export type StockEntry = { shoppingId: string; item: Omit<PantryItem, 'id' | 'createdAt'> }

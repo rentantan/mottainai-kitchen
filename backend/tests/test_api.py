@@ -5,7 +5,8 @@ from pathlib import Path
 
 
 import auth
-from recipes import FALLBACK_RECIPES, today_japan
+from clock import today_japan
+from recipe_fallbacks import FALLBACK_RECIPES
 
 
 def _item(name, days, quantity=1, unit="個", category="その他"):
@@ -70,8 +71,8 @@ def test_fallback_recipes_respect_budget_and_time(client, make_user):
 
 
 def test_frontend_fallback_recipes_match_backend():
-    """The offline copy in frontend/src/data.ts must list the same recipes as the backend."""
-    data_ts = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "data.ts").read_text(encoding="utf-8")
+    """The offline copy in frontend/src/lib/sampleData.ts must list the same recipes as the backend."""
+    data_ts = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "sampleData.ts").read_text(encoding="utf-8")
     frontend = re.findall(r"\{ id: '([^']+)', name: '([^']+)'.*?minutes: (\d+).*?estimatedCostYen: (\d+)", data_ts)
     backend = [(r["id"], r["name"], str(r["minutes"]), str(r["estimatedCostYen"])) for r in FALLBACK_RECIPES]
     assert sorted(frontend) == sorted(backend)
@@ -156,10 +157,10 @@ def test_microwave_mode_only_returns_stove_free_recipes(client, make_user):
 
 def test_frozen_items_are_flagged_in_prompt():
     from models import PantryInput, SuggestRequest
-    from recipes import _build_prompt
+    from gemini import build_prompt
     pantry = [PantryInput(name="ごはん", quantity=2, unit="杯", category="主食・麺",
                           expiry_date=today_japan() + timedelta(days=30), frozen=True)]
-    prompt = _build_prompt(SuggestRequest(preferences={"equipment": "microwave"}), pantry, [])
+    prompt = build_prompt(SuggestRequest(preferences={"equipment": "microwave"}), pantry, [])
     assert "冷凍保存中" in prompt and "電子レンジ（と電気ケトル・炊飯器）だけ" in prompt
 
 

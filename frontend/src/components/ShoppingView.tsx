@@ -2,7 +2,8 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Check, History, ListChecks, Plus, Refrigerator, Trash2 } from 'lucide-react'
 import type { PantryItem, ShoppingItem } from '../types'
-import { pantryMatchesFor, restockCandidates, stockText } from '../utils'
+import { pantryMatchesFor, restockCandidates } from '../lib/ingredients'
+import { stockText } from '../lib/format'
 
 /** Checking off and deleting never wait for other saves (see useShopping); adding and "冷蔵庫へ" do. */
 export function ShoppingView({ items, pantry, restock, busy, onAdd, onToggle, onDelete, onClearChecked, onMoveToPantry, onStockAll }: {

@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react'
 import { ArrowRight, Bell, CalendarDays, Settings2, UserCog } from 'lucide-react'
-import type { PantryItem } from '../types'
-import type { DataStatus, Tab } from '../Kitchen'
-import { daysUntil, expiryText, formatQuantity } from '../utils'
+import type { DataStatus, PantryItem, Tab } from '../types'
+import { daysUntil, expiryText } from '../lib/dates'
+import { formatQuantity } from '../lib/format'
 import { useDismiss } from '../hooks/useDismiss'
 
 const TAB_LABEL: Record<Tab, string> = { pantry: '冷蔵庫の中身', recipes: 'レシピを探す', shopping: '買い物リスト' }

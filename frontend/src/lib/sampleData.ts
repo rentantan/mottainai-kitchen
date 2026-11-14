@@ -1,18 +1,7 @@
-import type { Category, PantryItem, Recipe } from './types'
+import type { PantryItem, Recipe } from '../types'
+import { dateOffset } from './dates'
 
-export const STORAGE_KEY = 'mottainai-kitchen-pantry-v1'
-export const AUTH_TOKEN_KEY = 'mottainai-kitchen-auth-token-v1'
-export const AUTH_EMAIL_KEY = 'mottainai-kitchen-auth-email-v1'
-export const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-export const categoryOptions: Category[] = ['野菜・果物', '肉・魚', '乳製品・卵', '主食・麺', '調味料', 'その他']
-/** Categories that keep well in the freezer, and roughly how long (days) once frozen. */
-export const FREEZABLE_CATEGORIES: Category[] = ['肉・魚', '主食・麺', '野菜・果物', 'その他']
-export const FREEZER_DAYS = 30
-export type Equipment = 'any' | 'microwave'
-export const categoryEmoji: Record<Category, string> = {
-  '野菜・果物': '🥬', '肉・魚': '🥩', '乳製品・卵': '🥚', '主食・麺': '🍚', '調味料': '🧂', 'その他': '🛒',
-}
-
+/** Sample fridge for 「サンプルを入れる」. */
 export const demoItems: PantryItem[] = [
   { id: 'demo-1', name: '牛乳', quantity: 1, unit: '本', expiryDate: dateOffset(1), category: '乳製品・卵', emoji: '🥛', priceYen: 230, note: '開封済み', createdAt: new Date().toISOString() },
   { id: 'demo-2', name: '卵', quantity: 6, unit: '個', expiryDate: dateOffset(3), category: '乳製品・卵', emoji: '🥚', priceYen: 250, note: '', createdAt: new Date().toISOString() },
@@ -24,13 +13,7 @@ export const demoItems: PantryItem[] = [
   { id: 'demo-9', name: 'ごはん', quantity: 3, unit: '杯', expiryDate: dateOffset(25), category: '主食・麺', emoji: '🍚', frozen: true, note: 'まとめて炊いて冷凍', createdAt: new Date().toISOString() },
   { id: 'demo-8', name: '豆腐', quantity: 1, unit: '丁', expiryDate: dateOffset(1), category: 'その他', emoji: '⬜', priceYen: 60, note: '', createdAt: new Date().toISOString() },
 ]
-
-export function dateOffset(days: number) {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-/** Offline copy of backend FALLBACK_RECIPES (backend/recipes.py). Keep both lists in sync. microwaveOnly: no stove needed. */
+/** Offline copy of backend FALLBACK_RECIPES (backend/recipe_fallbacks.py). Keep both lists in sync. microwaveOnly: no stove needed. */
 export const fallbackRecipes: Omit<Recipe, 'matchedIngredients' | 'missingIngredients' | 'usesExpiring' | 'matchPercent'>[] = [
   { id: 'egg-fried-rice', name: '卵だけでも満足チャーハン', description: 'ごはんと卵があれば作れる、洗い物少なめの定番ごはん。', minutes: 10, difficulty: 'かんたん', emoji: '🍳', ingredients: ['ごはん', '卵', 'しょうゆ', 'サラダ油'], ingredientDetails: ['ごはん 茶碗1杯', '卵 1個', 'しょうゆ 小さじ1', 'サラダ油 小さじ2'], estimatedCostYen: 100, servings: 1, steps: ['卵をボウルに割り入れ、白身と黄身が混ざるまで箸でよく混ぜる。ごはんが冷たい場合は電子レンジ（600W）で1分温めておく。', 'フライパンにサラダ油小さじ2を入れて中火で1分温め、卵を流し入れる。', '卵が半分ほど固まったら（約20秒）すぐにごはんを加え、へらでごはんをほぐしながら卵と混ぜる。', '中火のまま2〜3分炒め、ごはんがパラッとして卵に生っぽい部分がなくなったらOK。', 'フライパンのふちに沿ってしょうゆ小さじ1を回し入れ、30秒ほど全体を混ぜて火を止める。'] },
   { id: 'tofu-don', name: '豆腐のそぼろ風どんぶり', description: 'ひき肉なしでもボリュームが出る、節約向けの一皿。', minutes: 15, difficulty: 'かんたん', emoji: '🍚', ingredients: ['ごはん', '豆腐', 'しょうゆ', '砂糖', 'サラダ油'], ingredientDetails: ['ごはん 茶碗1杯', '豆腐 1/2丁', 'しょうゆ 大さじ1', '砂糖 小さじ1', 'サラダ油 小さじ1'], estimatedCostYen: 150, servings: 1, steps: ['豆腐をキッチンペーパー2枚で包み、平らな皿などを上にのせて5分置き、水気を取る。', 'フライパンに油小さじ1を入れて中火で温め、豆腐を入れる。へらで細かく崩しながら炒める。', '中火のまま5分ほど炒め、豆腐から水が出なくなり、ポロポロのそぼろ状になったらOK。', 'しょうゆ大さじ1と砂糖小さじ1を加え、1分ほど混ぜて全体に色がついたら火を止める。', '茶碗にごはんを盛り、豆腐そぼろをのせる。'] },

@@ -4,12 +4,13 @@ import re
 import secrets
 import time
 import uuid
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
 
-from database import CurrentUser, db_connection, _password_hash, _token_hash, _verify_password, _ensure_user_state
+from clock import now_japan_iso
+from database import db_connection
+from security import CurrentUser, hash_password, hash_token, verify_password
+from store import ensure_user_state
 from models import AccountDelete, AuthCredentials, AuthSession, PasswordChange
 
 router = APIRouter(prefix="/api/auth")
@@ -32,7 +33,7 @@ _registrations: dict[str, list[float]] = {}
 
 # Verifying against a throwaway hash when the email is unknown keeps the response
 # time the same, so timing does not reveal which addresses have accounts.
-_DUMMY_HASH = _password_hash(secrets.token_hex(16))
+_DUMMY_HASH = hash_password(secrets.token_hex(16))
 
 
 def _client_ip(request: Request) -> str:
@@ -72,14 +73,14 @@ def register(payload: AuthCredentials, request: Request) -> dict[str, str]:
         user_id = str(uuid.uuid4())
         connection.execute(
             "INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
-            (user_id, email, _password_hash(payload.password), datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()),
+            (user_id, email, hash_password(payload.password), now_japan_iso()),
         )
         if connection.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"] == 1:
             # Hand pre-login (legacy) data to the first account. This must run before
-            # _ensure_user_state, otherwise the unique index on app_state.user_id fails.
+            # ensure_user_state, otherwise the unique index on app_state.user_id fails.
             connection.execute("UPDATE pantry_items SET user_id = ? WHERE user_id IS NULL", (user_id,))
             connection.execute("UPDATE app_state SET user_id = ? WHERE id = 1 AND user_id IS NULL", (user_id,))
-        _ensure_user_state(connection, user_id)
+        ensure_user_state(connection, user_id)
     _registrations.setdefault(ip, []).append(now)
     return _create_session(user_id, email)
 
@@ -98,7 +99,7 @@ def login(payload: AuthCredentials, request: Request) -> dict[str, str]:
         user = connection.execute(
             "SELECT id, email, password_hash FROM users WHERE email = ?", (email,)
         ).fetchone()
-    valid = _verify_password(payload.password, user["password_hash"] if user else _DUMMY_HASH)
+    valid = verify_password(payload.password, user["password_hash"] if user else _DUMMY_HASH)
     if user is None or not valid:
         for key, _ in keys:
             _login_failures.setdefault(key, []).append(now)
@@ -115,7 +116,7 @@ def _create_session(user_id: str, email: str) -> dict[str, str]:
         connection.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (now,))
         connection.execute(
             "INSERT INTO auth_sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
-            (_token_hash(token), user_id, now + SESSION_SECONDS),
+            (hash_token(token), user_id, now + SESSION_SECONDS),
         )
     return {"token": token, "email": email}
 
@@ -128,7 +129,7 @@ def _bearer_token(request: Request) -> str:
 def _require_password(user_id: str, password: str) -> None:
     with db_connection() as connection:
         row = connection.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
-    if row is None or not _verify_password(password, row["password_hash"]):
+    if row is None or not verify_password(password, row["password_hash"]):
         raise HTTPException(status_code=403, detail="現在のパスワードが違います")
 
 
@@ -142,7 +143,7 @@ def logout(request: Request) -> dict[str, bool]:
     token = _bearer_token(request)
     if token:
         with db_connection() as connection:
-            connection.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (_token_hash(token),))
+            connection.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (hash_token(token),))
     return {"loggedOut": True}
 
 
@@ -151,7 +152,7 @@ def logout_other_devices(user: CurrentUser, request: Request) -> dict[str, int]:
     """End every session of this account except the one making the request (lost phone, shared PC)."""
     with db_connection() as connection:
         removed = connection.execute(
-            "DELETE FROM auth_sessions WHERE user_id = ? AND token_hash != ?", (user["id"], _token_hash(_bearer_token(request)))
+            "DELETE FROM auth_sessions WHERE user_id = ? AND token_hash != ?", (user["id"], hash_token(_bearer_token(request)))
         ).rowcount
     return {"loggedOut": removed}
 
@@ -161,9 +162,9 @@ def change_password(payload: PasswordChange, user: CurrentUser, request: Request
     """Change the password. Other devices are logged out; this one stays logged in."""
     _require_password(user["id"], payload.currentPassword)
     with db_connection() as connection:
-        connection.execute("UPDATE users SET password_hash = ? WHERE id = ?", (_password_hash(payload.newPassword), user["id"]))
+        connection.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(payload.newPassword), user["id"]))
         connection.execute(
-            "DELETE FROM auth_sessions WHERE user_id = ? AND token_hash != ?", (user["id"], _token_hash(_bearer_token(request)))
+            "DELETE FROM auth_sessions WHERE user_id = ? AND token_hash != ?", (user["id"], hash_token(_bearer_token(request)))
         )
     return {"changed": True}
 

@@ -249,29 +249,43 @@ npm run dev
 
 ```text
 backend/
-├── main.py        # FastAPIの設定・CORS・ルーター登録・/api/health
-├── config.py      # 環境変数の読み込み
-├── database.py    # SQLite接続・テーブル作成・認証の共通処理
-├── models.py      # Pydanticモデル
-├── ingredients.py # 食材名の正規化・表記ゆれ（別名）の照合
-├── auth.py        # /api/auth   新規登録・ログイン・ログアウト
-├── pantry.py      # /api/pantry 食材のCRUD・消費・削除の取り消し・もったいない記録・リセット
-├── shopping.py    # /api/shopping, /api/staples 買い物リスト・常備調味料
-├── recipes.py     # /api/recipes/suggest Gemini連携・キャッシュ・呼び出し制限・アプリ内レシピ
-├── saved_recipes.py # /api/recipes/saved 保存したレシピの一覧・保存・削除・作った回数
-└── tests/         # pytestによるAPI・照合処理のテスト
+├── main.py             # FastAPIの設定・CORS・ルーター登録・/api/health
+├── config.py           # 環境変数の読み込み
+├── clock.py            # 日本時間の現在時刻・今日の日付
+├── database.py         # SQLite接続・スキーマのマイグレーション
+├── security.py         # パスワード・トークンのハッシュ、ログイン中ユーザーの取得（CurrentUser）
+├── store.py            # 複数のルーターで使うDB読み書き（食材・もったいない記録・常備調味料）
+├── models.py           # Pydanticモデル
+├── ingredients.py      # 食材名の正規化・表記ゆれ（別名）の照合
+├── auth.py             # /api/auth   新規登録・ログイン・ログアウト
+├── pantry.py           # /api/pantry 食材のCRUD・消費・削除の取り消し・もったいない記録・リセット
+├── shopping.py         # /api/shopping, /api/staples 買い物リスト・常備調味料
+├── recipes.py          # /api/recipes/suggest 提案の流れ・食材との照合と並べ替え
+├── gemini.py           # Gemini APIのプロンプト・応答スキーマ・通信（503の再試行）
+├── recipe_cache.py     # 成功したAI提案のSQLiteキャッシュ
+├── recipe_limits.py    # AI提案の呼び出し制限（間隔・1時間・1日）
+├── recipe_fallbacks.py # アプリ内レシピ（frontend/src/lib/sampleData.ts と同じ内容を保つ）
+├── saved_recipes.py    # /api/recipes/saved 保存したレシピの一覧・保存・削除・作った回数
+└── tests/              # pytestによるAPI・照合処理のテスト
 
 frontend/src/
-├── App.tsx        # ログイン状態の管理
-├── Kitchen.tsx    # ログイン後の画面状態とAPI操作（ログインごとに作り直し、別ユーザーのデータを残さない）
-├── components/    # 各画面（冷蔵庫・レシピ・買い物リスト・もったいない記録）とモーダル、ログイン画面
-├── hooks/         # useToast（通知表示）、useDismiss（Esc・外側クリックで閉じる）
-├── api.ts         # API通信とエラーメッセージの日本語化
-├── types.ts       # 型定義
-├── data.ts        # 定数・サンプルデータ・アプリ内レシピ（backend/recipes.py と同じ内容を保つ）
-├── foodPresets.ts # 食材名から単位・カテゴリ・期限の目安を推測する辞書
-├── utils.ts       # 日付計算・食材名の照合（backend/ingredients.py と同じ規則）・レシピ評価・localStorage
-└── styles.css     # 全体のスタイル（レスポンシブ対応を含む）
+├── App.tsx          # ログイン状態の管理
+├── Kitchen.tsx      # ログイン後の画面状態とAPI操作（ログインごとに作り直し、別ユーザーのデータを残さない）
+├── types.ts         # 型定義
+├── components/      # 各画面（冷蔵庫・レシピ・買い物リスト・もったいない記録）とモーダル、ログイン画面
+├── hooks/           # useToast・useDismiss・useModal・useRecipes・useShopping
+├── lib/             # Reactに依存しない処理（テストもここ）
+│   ├── api.ts         # API通信とエラーメッセージの日本語化
+│   ├── config.ts      # APIのURL・localStorageのキー
+│   ├── constants.ts   # カテゴリ・冷凍の目安日数
+│   ├── dates.ts       # 日付計算・期限の表示
+│   ├── format.ts      # 数量・在庫の表示
+│   ├── ingredients.ts # 食材名の照合（backend/ingredients.py と同じ規則）
+│   ├── recipes.ts     # レシピの評価・並べ替え・保存用データ
+│   ├── storage.ts     # localStorageの読み書き
+│   ├── sampleData.ts  # サンプル食材・アプリ内レシピ（backend/recipe_fallbacks.py と同じ内容を保つ）
+│   └── foodPresets.ts # 食材名から単位・カテゴリ・期限の目安を推測する辞書
+└── styles.css       # 全体のスタイル（レスポンシブ対応を含む）
 ```
 
 見た目はCSSで一元管理し、TSXは表示の構造に専念させています。

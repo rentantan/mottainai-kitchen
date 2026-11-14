@@ -3,9 +3,11 @@ from datetime import timedelta
 
 import pytest
 
+import gemini as gemini_client
+import recipe_limits
 import recipes
+from clock import today_japan
 from database import db_connection
-from recipes import today_japan
 
 PANTRY = [{"name": "卵", "quantity": 6, "unit": "個", "category": "乳製品・卵",
            "expiryDate": (today_japan() + timedelta(days=2)).isoformat()}]
@@ -29,13 +31,13 @@ def gemini(monkeypatch):
         return {"recipes": [_gemini_recipe(f"案{n}-{i}") for i in range(3)]}
 
     monkeypatch.setattr(recipes, "GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr(recipes, "_gemini_generate", fake_generate)
-    monkeypatch.setattr(recipes, "MIN_REQUEST_INTERVAL_SECONDS", 0)
-    monkeypatch.setattr(recipes, "MAX_REQUESTS_PER_HOUR_PER_USER", 100)
-    monkeypatch.setattr(recipes, "MAX_REQUESTS_PER_DAY", 100)
-    monkeypatch.setattr(recipes, "MAX_REQUESTS_PER_DAY_PER_USER", 2)
-    recipes._request_history.clear()
-    recipes._last_request_at.clear()
+    monkeypatch.setattr(gemini_client, "generate", fake_generate)
+    monkeypatch.setattr(recipe_limits, "MIN_REQUEST_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(recipe_limits, "MAX_REQUESTS_PER_HOUR_PER_USER", 100)
+    monkeypatch.setattr(recipe_limits, "MAX_REQUESTS_PER_DAY", 100)
+    monkeypatch.setattr(recipe_limits, "MAX_REQUESTS_PER_DAY_PER_USER", 2)
+    recipe_limits._request_history.clear()
+    recipe_limits._last_request_at.clear()
     with db_connection() as connection:
         connection.execute("DELETE FROM gemini_daily_usage")
         connection.execute("DELETE FROM gemini_user_daily_usage")
@@ -105,7 +107,7 @@ def test_daily_limit_is_per_user(client, make_user, gemini):
 
 
 def test_app_wide_daily_cap_still_applies(client, make_user, gemini, monkeypatch):
-    monkeypatch.setattr(recipes, "MAX_REQUESTS_PER_DAY", 1)
+    monkeypatch.setattr(recipe_limits, "MAX_REQUESTS_PER_DAY", 1)
     _, alice = make_user()
     _, bob = make_user()
     assert _suggest(client, alice)["source"] == "gemini"
@@ -123,7 +125,7 @@ def test_failed_call_is_not_charged_to_user(client, make_user, gemini):
 
 
 def test_interval_limit_is_per_user(client, make_user, gemini, monkeypatch):
-    monkeypatch.setattr(recipes, "MIN_REQUEST_INTERVAL_SECONDS", 60)
+    monkeypatch.setattr(recipe_limits, "MIN_REQUEST_INTERVAL_SECONDS", 60)
     _, alice = make_user()
     _, bob = make_user()
     assert _suggest(client, alice)["source"] == "gemini"
