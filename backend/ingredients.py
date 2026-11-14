@@ -1,7 +1,7 @@
 """Ingredient-name matching shared by Gemini and fallback recipes.
 
 Keep ALIAS_GROUPS and the normalisation rules in sync with
-frontend/src/utils.ts (INGREDIENT_ALIAS_GROUPS / normalize).
+frontend/src/lib/ingredients.ts (INGREDIENT_ALIAS_GROUPS / normalize).
 """
 from __future__ import annotations
 

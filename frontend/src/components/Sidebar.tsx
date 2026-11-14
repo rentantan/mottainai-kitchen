@@ -1,5 +1,5 @@
 import { CookingPot, Heart, Leaf, ListChecks, Refrigerator, Settings2, ShoppingBasket, Trash2 } from 'lucide-react'
-import type { Tab } from '../Kitchen'
+import type { Tab } from '../types'
 
 export function Sidebar({ activeTab, onTab, pantryCount, shoppingCount, consumed, wasted, onReset }: { activeTab: Tab; onTab: (tab: Tab) => void; pantryCount: number; shoppingCount: number; consumed: number; wasted: number; onReset: () => void }) {
   const link = (tab: Tab, icon: JSX.Element, label: string, count?: number) => (

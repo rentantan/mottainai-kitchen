@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 
-from database import CurrentUser, db_connection
+from clock import now_japan_iso
+from database import db_connection
+from security import CurrentUser
 from models import SavedRecipeWrite
 
 # Saved (favourite) recipes. Only the pantry-independent fields are stored; the frontend
@@ -67,7 +67,7 @@ def save_recipe(payload: SavedRecipeWrite, user: CurrentUser) -> dict[str, Any]:
             saved_id = str(uuid.uuid4())
             connection.execute(
                 "INSERT INTO saved_recipes (id, user_id, name, recipe_json, saved_at) VALUES (?, ?, ?, ?, ?)",
-                (saved_id, user["id"], recipe["name"], recipe_json, datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()),
+                (saved_id, user["id"], recipe["name"], recipe_json, now_japan_iso()),
             )
         return {"items": _read_saved(connection, user["id"]), "id": saved_id}
 
@@ -82,7 +82,7 @@ def delete_saved(saved_id: str, user: CurrentUser) -> dict[str, Any]:
 @router.post("/{saved_id}/cooked")
 def record_cooked(saved_id: str, user: CurrentUser) -> dict[str, Any]:
     """Count one "作った！" of a saved recipe."""
-    now = datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()
+    now = now_japan_iso()
     with db_connection() as connection:
         result = connection.execute(
             "UPDATE saved_recipes SET cooked_count = cooked_count + 1, last_cooked_at = ? WHERE id = ? AND user_id = ?",

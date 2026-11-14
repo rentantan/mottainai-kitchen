@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { PantryItem, SavedRecipe } from './types'
-import { dateOffset } from './data'
-import { daysUntil, expiryClass, expiryText, formatQuantity, getFallbackSuggestions, guessAmount, nameMatches, normalize, pantryMatchesFor, findSaved, rankSavedRecipes, toSavedPayload } from './utils'
+import type { PantryItem, SavedRecipe } from '../types'
+import { dateOffset, daysUntil, expiryClass, expiryText } from './dates'
+import { formatQuantity } from './format'
+import { nameMatches, normalize, pantryMatchesFor } from './ingredients'
+import { findSaved, getFallbackSuggestions, guessAmount, rankSavedRecipes, toSavedPayload } from './recipes'
 
 const item = (name: string, days: number, extra: Partial<PantryItem> = {}): PantryItem => ({
   id: name, name, quantity: 1, unit: '個', expiryDate: dateOffset(days), category: 'その他', emoji: '🛒', note: '', createdAt: '', ...extra,

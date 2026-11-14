@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CircleCheck, RefreshCw } from 'lucide-react'
-import type { PantryItem, PantryState, Recipe, SavedRecipe, ShoppingItem, WasteSummary } from './types'
-import { FREEZER_DAYS, dateOffset, demoItems } from './data'
-import { ApiError, apiFetch } from './api'
-import { daysUntil, findSaved, formatQuantity, loadCachedPantry, pantryMatchesFor, saveCachedPantry, stockText, toSavedPayload } from './utils'
+import type { DataStatus, PantryFilter, PantryItem, PantryState, Recipe, SavedRecipe, ShoppingItem, Tab, WasteSummary } from './types'
+import { FREEZER_DAYS } from './lib/constants'
+import { dateOffset, daysUntil } from './lib/dates'
+import { demoItems } from './lib/sampleData'
+import { ApiError, apiFetch } from './lib/api'
+import { findSaved, toSavedPayload } from './lib/recipes'
+import { formatQuantity, stockText } from './lib/format'
+import { loadCachedPantry, saveCachedPantry } from './lib/storage'
+import { pantryMatchesFor } from './lib/ingredients'
 import { useToast } from './hooks/useToast'
 import { useShopping } from './hooks/useShopping'
 import { useRecipes } from './hooks/useRecipes'
@@ -22,10 +27,6 @@ import { StockModal } from './components/StockModal'
 import type { StockEntry } from './components/StockModal'
 import type { DeleteReason } from './components/DeleteModal'
 
-export type Tab = 'pantry' | 'recipes' | 'shopping'
-export type PantryFilter = 'all' | 'urgent' | 'expired'
-/** loading: first fetch in progress / ready: in sync with SQLite / offline: showing the last cached snapshot. */
-export type DataStatus = 'loading' | 'ready' | 'offline'
 
 const EMPTY_WASTE: WasteSummary = { items: [], totalCount: 0, monthCount: 0 }
 /** A mutation may return a toast message, optionally with an action button such as "元に戻す". */
@@ -68,6 +69,12 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
       throw error
     }
   }
+  /** Replace the fridge, use-up count and waste summary with a full state from the server. */
+  function applyPantryState(state: PantryState) {
+    setPantry(state.items)
+    setConsumed(state.consumedCount)
+    setWaste(state.waste ?? EMPTY_WASTE)
+  }
   const errorText = (error: unknown) => error instanceof Error ? error.message : '処理に失敗しました。'
 
   async function loadAll() {
@@ -85,9 +92,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
         call<{ names: string[] }>('/api/staples'),
         call<{ items: SavedRecipe[] }>('/api/recipes/saved'),
       ])
-      setPantry(state.items)
-      setConsumed(state.consumedCount)
-      setWaste(state.waste ?? EMPTY_WASTE)
+      applyPantryState(state)
       shoppingList.replace(shoppingState.items)
       setStaples(staplesState.names)
       setSavedRecipes(savedState.items)
@@ -179,7 +184,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
       const state = await call<PantryState>('/api/pantry/undo-consume', {
         method: 'POST', body: { entries: entries.map(({ logId, item }) => ({ logId, item: toWrite(item), createdAt: item.createdAt })) },
       })
-      setPantry(state.items); setConsumed(state.consumedCount); setWaste(state.waste ?? EMPTY_WASTE)
+      applyPantryState(state)
       return '元に戻しました'
     })
   }
@@ -230,7 +235,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
     if (message && !window.confirm(message)) return
     void mutate(async () => {
       const state = await call<PantryState>('/api/pantry/reset', { method: 'PUT', body: demoItems.map(toWrite) })
-      setPantry(state.items); setConsumed(state.consumedCount); setWaste(state.waste ?? EMPTY_WASTE); setFilter('all')
+      applyPantryState(state); setFilter('all')
       return 'サンプル食材を入れました。試し終わったら「冷蔵庫の中身」の「すべて削除」で空に戻せます'
     })
   }
@@ -242,7 +247,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
     const resetRecords = hasRecords && window.confirm('使い切り数ともったいない記録もリセットしますか？\n（OK：リセットする／キャンセル：記録は残す）')
     void mutate(async () => {
       const state = await call<PantryState>(`/api/pantry/reset${resetRecords ? '?reset_records=true' : ''}`, { method: 'PUT', body: [] })
-      setPantry(state.items); setConsumed(state.consumedCount); setWaste(state.waste ?? EMPTY_WASTE); setFilter('all')
+      applyPantryState(state); setFilter('all')
       return resetRecords ? '冷蔵庫と記録をリセットしました' : '冷蔵庫を空にしました（記録は残しています）'
     })
   }
@@ -252,7 +257,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
     void mutate(async () => {
       const before = new Map(pantry.map((row) => [row.id, row]))
       const state = await call<PantryState & { logIds: string[] }>('/api/pantry/consume-batch', { method: 'POST', body: { items: entries } })
-      setPantry(state.items); setConsumed(state.consumedCount); setWaste(state.waste ?? EMPTY_WASTE); setSelectedRecipe(null)
+      applyPantryState(state); setSelectedRecipe(null)
       const undoEntries = entries.map((entry, index) => ({ logId: state.logIds[index], item: before.get(entry.id) as PantryItem }))
       let cookedCount: number | undefined
       if (savedEntry) {

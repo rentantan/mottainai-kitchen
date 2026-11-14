@@ -1,6 +1,7 @@
 import { Eraser, Trash2, X } from 'lucide-react'
 import type { PantryItem } from '../types'
-import { daysUntil, expiryText, formatQuantity } from '../utils'
+import { daysUntil, expiryText } from '../lib/dates'
+import { formatQuantity } from '../lib/format'
 import { useModal } from '../hooks/useModal'
 
 export type DeleteReason = 'discarded' | 'removed'

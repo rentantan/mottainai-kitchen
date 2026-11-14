@@ -57,8 +57,8 @@ def test_does_not_match_different_foods(required, name):
 
 
 def test_frontend_alias_groups_match_backend():
-    """frontend/src/utils.ts must use the same alias groups as backend/ingredients.py."""
-    utils_ts = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "utils.ts").read_text(encoding="utf-8")
-    block = utils_ts.split("INGREDIENT_ALIAS_GROUPS: string[][] = [", 1)[1].split("\n]", 1)[0]
+    """frontend/src/lib/ingredients.ts must use the same alias groups as backend/ingredients.py."""
+    ingredients_ts = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "ingredients.ts").read_text(encoding="utf-8")
+    block = ingredients_ts.split("INGREDIENT_ALIAS_GROUPS: string[][] = [", 1)[1].split("\n]", 1)[0]
     frontend = [re.findall(r"'([^']+)'", line) for line in block.splitlines() if line.strip().startswith("[")]
     assert frontend == ALIAS_GROUPS

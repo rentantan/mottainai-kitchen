@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Leaf } from 'lucide-react'
-import { apiFetch } from '../api'
+import { apiFetch } from '../lib/api'
 
 export function LoginScreen({ notice, onAuthenticated }: { apiBase: string; notice?: string; onAuthenticated: (token: string, email: string) => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login')

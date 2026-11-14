@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import datetime
 from typing import Any, Literal
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Body, HTTPException
 
-from database import (CurrentUser, _db_item_to_api, _ensure_user_state, _insert_pantry_item,
-                      _read_pantry_state, _read_waste, db_connection, item_value_yen)
+from clock import now_japan_iso
+from database import db_connection
+from security import CurrentUser
+from store import (ensure_user_state, insert_pantry_item, item_to_api, item_value_yen, read_pantry_state,
+                   read_waste)
 from models import BatchConsumeRequest, ConsumeRequest, PantryItemWrite, RestoreRequest, UndoConsumeRequest
 
 router = APIRouter(prefix="/api/pantry")
@@ -21,15 +22,15 @@ _EPSILON = 1e-6
 @router.get("")
 def get_pantry(user: CurrentUser) -> dict[str, Any]:
     with db_connection() as connection:
-        _ensure_user_state(connection, user["id"])
-        return _read_pantry_state(connection, user["id"])
+        ensure_user_state(connection, user["id"])
+        return read_pantry_state(connection, user["id"])
 
 
 @router.post("")
 def create_pantry_item(payload: PantryItemWrite, user: CurrentUser) -> dict[str, Any]:
     with db_connection(immediate=True) as connection:
-        _ensure_user_state(connection, user["id"])
-        return _insert_pantry_item(connection, payload, user["id"])
+        ensure_user_state(connection, user["id"])
+        return insert_pantry_item(connection, payload, user["id"])
 
 
 @router.put("/reset")
@@ -38,7 +39,7 @@ def reset_pantry(user: CurrentUser, payload: list[PantryItemWrite] = Body(max_le
     """Replace all pantry items. The use-up count and waste log are kept unless
     reset_records=true: wiping a user's history must be asked for explicitly."""
     with db_connection(immediate=True) as connection:
-        _ensure_user_state(connection, user["id"])
+        ensure_user_state(connection, user["id"])
         connection.execute("DELETE FROM pantry_items WHERE user_id = ?", (user["id"],))
         connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user["id"],))
         if reset_records:
@@ -46,27 +47,27 @@ def reset_pantry(user: CurrentUser, payload: list[PantryItemWrite] = Body(max_le
             connection.execute("DELETE FROM waste_log WHERE user_id = ?", (user["id"],))
             connection.execute("DELETE FROM consume_log WHERE user_id = ?", (user["id"],))
         for item in payload:
-            _insert_pantry_item(connection, item, user["id"])
-        return _read_pantry_state(connection, user["id"])
+            insert_pantry_item(connection, item, user["id"])
+        return read_pantry_state(connection, user["id"])
 
 
 @router.post("/restore")
 def restore_pantry_item(payload: RestoreRequest, user: CurrentUser) -> dict[str, Any]:
     with db_connection(immediate=True) as connection:
-        _ensure_user_state(connection, user["id"])
-        item = _insert_pantry_item(connection, payload.item, user["id"], payload.createdAt)
+        ensure_user_state(connection, user["id"])
+        item = insert_pantry_item(connection, payload.item, user["id"], payload.createdAt)
         if payload.wasteId:
             connection.execute("DELETE FROM waste_log WHERE id = ? AND user_id = ?", (payload.wasteId, user["id"]))
-        return {"item": item, "waste": _read_waste(connection, user["id"])}
+        return {"item": item, "waste": read_waste(connection, user["id"])}
 
 
 @router.post("/consume-batch")
 def consume_batch(payload: BatchConsumeRequest, user: CurrentUser) -> dict[str, Any]:
     """Consume several pantry items at once (e.g. after cooking a recipe). All-or-nothing."""
     with db_connection(immediate=True) as connection:
-        _ensure_user_state(connection, user["id"])
+        ensure_user_state(connection, user["id"])
         log_ids = [_consume(connection, user["id"], entry.id, entry.amount)[1] for entry in payload.items]
-        return {**_read_pantry_state(connection, user["id"]), "logIds": log_ids}
+        return {**read_pantry_state(connection, user["id"]), "logIds": log_ids}
 
 
 @router.post("/undo-consume")
@@ -89,13 +90,13 @@ def undo_consume(payload: UndoConsumeRequest, user: CurrentUser) -> dict[str, An
                     raise HTTPException(status_code=409, detail="この食材はすでに削除されているため、元に戻せません")
                 if entry.item is None:
                     raise HTTPException(status_code=400, detail="使い切った食材を戻すには食材の情報が必要です")
-                _insert_pantry_item(connection, entry.item, user["id"], entry.createdAt)
+                insert_pantry_item(connection, entry.item, user["id"], entry.createdAt)
             if log["used_up"]:
                 connection.execute(
                     "UPDATE app_state SET consumed_count = MAX(consumed_count - 1, 0) WHERE user_id = ?", (user["id"],)
                 )
             connection.execute("DELETE FROM consume_log WHERE id = ?", (entry.logId,))
-        return _read_pantry_state(connection, user["id"])
+        return read_pantry_state(connection, user["id"])
 
 
 @router.put("/{item_id}")
@@ -117,7 +118,7 @@ def update_pantry_item(item_id: str, payload: PantryItemWrite, user: CurrentUser
             raise HTTPException(status_code=404, detail="食材が見つかりません")
         connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user["id"],))
         row = connection.execute("SELECT * FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user["id"])).fetchone()
-        return _db_item_to_api(row)
+        return item_to_api(row)
 
 
 @router.delete("/{item_id}")
@@ -136,9 +137,9 @@ def delete_pantry_item(item_id: str, user: CurrentUser, reason: Literal["removed
                 """INSERT INTO waste_log (id, user_id, name, quantity, unit, category, emoji, expiry_date, discarded_at, value_yen)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (waste_id, user["id"], row["name"], row["quantity"], row["unit"], row["category"], row["emoji"],
-                 row["expiry_date"], datetime.now(ZoneInfo("Asia/Tokyo")).isoformat(), item_value_yen(row)),
+                 row["expiry_date"], now_japan_iso(), item_value_yen(row)),
             )
-        return {"deleted": True, "item": _db_item_to_api(row), "wasteId": waste_id, "waste": _read_waste(connection, user["id"])}
+        return {"deleted": True, "item": item_to_api(row), "wasteId": waste_id, "waste": read_waste(connection, user["id"])}
 
 
 @router.post("/{item_id}/consume")
@@ -148,7 +149,7 @@ def consume_pantry_item(item_id: str, user: CurrentUser, payload: ConsumeRequest
         updated_item, log_id = _consume(connection, user["id"], item_id, amount)
         state = connection.execute("SELECT consumed_count FROM app_state WHERE user_id = ?", (user["id"],)).fetchone()
         return {"item": updated_item, "consumedCount": int(state["consumed_count"]) if state else 0,
-                "logId": log_id, "waste": _read_waste(connection, user["id"])}
+                "logId": log_id, "waste": read_waste(connection, user["id"])}
 
 
 def _consume(connection: sqlite3.Connection, user_id: str, item_id: str, amount: float) -> tuple[dict[str, Any] | None, str]:
@@ -165,7 +166,7 @@ def _consume(connection: sqlite3.Connection, user_id: str, item_id: str, amount:
     log_id = str(uuid.uuid4())
     connection.execute(
         "INSERT INTO consume_log (id, user_id, item_id, name, amount, used_up, consumed_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (log_id, user_id, item_id, row["name"], used, int(used_up), datetime.now(ZoneInfo("Asia/Tokyo")).isoformat()),
+        (log_id, user_id, item_id, row["name"], used, int(used_up), now_japan_iso()),
     )
     if used_up:
         connection.execute("DELETE FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user_id))
@@ -176,4 +177,4 @@ def _consume(connection: sqlite3.Connection, user_id: str, item_id: str, amount:
     connection.execute("UPDATE pantry_items SET quantity = ? WHERE id = ? AND user_id = ?", (remaining, item_id, user_id))
     connection.execute("UPDATE app_state SET initialized = 1 WHERE user_id = ?", (user_id,))
     updated = connection.execute("SELECT * FROM pantry_items WHERE id = ? AND user_id = ?", (item_id, user_id)).fetchone()
-    return _db_item_to_api(updated), log_id
+    return item_to_api(updated), log_id

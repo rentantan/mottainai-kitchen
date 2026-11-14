@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Check, X } from 'lucide-react'
 import type { PantryItem } from '../types'
-import { formatQuantity } from '../utils'
+import { formatQuantity } from '../lib/format'
 import { useModal } from '../hooks/useModal'
 
 /** Ask how much was used: presets (1 unit / half / all) or a custom amount. */

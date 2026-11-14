@@ -2,11 +2,13 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Check, Refrigerator, Sparkles, X } from 'lucide-react'
 import type { Category, PantryItem } from '../types'
-import { FREEZER_DAYS, categoryEmoji, categoryOptions, dateOffset } from '../data'
-import { findFoodPreset } from '../foodPresets'
-import type { FoodPreset } from '../foodPresets'
+import { categoryEmoji, categoryOptions, FREEZER_DAYS } from '../lib/constants'
+import { dateOffset, daysUntil } from '../lib/dates'
+import { findFoodPreset } from '../lib/foodPresets'
+import type { FoodPreset } from '../lib/foodPresets'
 import { useModal } from '../hooks/useModal'
-import { daysUntil, sameFoodInPantry, stockText } from '../utils'
+import { sameFoodInPantry } from '../lib/ingredients'
+import { stockText } from '../lib/format'
 
 const UNIT_SUGGESTIONS = ['個', '本', '枚', '袋', 'パック', '丁', '玉', '束', '缶', '切れ', 'g', 'kg', 'ml', 'L']
 const EXPIRY_SHORTCUTS: { label: string; days: number }[] = [

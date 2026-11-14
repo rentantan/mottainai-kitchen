@@ -2,7 +2,10 @@ import { useMemo, useState } from 'react'
 import { AlertTriangle, ArrowLeft, Bookmark, BookmarkCheck, Check, ChefHat, Clock3, ListPlus, Plus, ShoppingBasket, Utensils, Wallet, X } from 'lucide-react'
 import type { PantryItem, Recipe } from '../types'
 import { useModal } from '../hooks/useModal'
-import { daysUntil, expiryText, formatQuantity, guessAmount, isStaple, pantryMatchesFor } from '../utils'
+import { daysUntil, expiryText } from '../lib/dates'
+import { formatQuantity } from '../lib/format'
+import { guessAmount } from '../lib/recipes'
+import { isStaple, pantryMatchesFor } from '../lib/ingredients'
 
 type CookLine = { item: PantryItem; detail: string; checked: boolean; amount: string }
 

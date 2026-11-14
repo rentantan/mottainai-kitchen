@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { Lightbulb, Recycle, Trash2 } from 'lucide-react'
 import type { WasteSummary } from '../types'
-import { formatQuantity, normalize } from '../utils'
+import { formatQuantity } from '../lib/format'
+import { normalize } from '../lib/ingredients'
 
 /** "もったいない記録": how much food was thrown away, and which items get wasted most often. */
 export function WastePanel({ waste, consumed }: { waste: WasteSummary; consumed: number }) {

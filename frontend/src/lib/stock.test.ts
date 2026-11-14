@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { PantryItem } from './types'
-import { dateOffset } from './data'
-import { restockCandidates, sameFoodInPantry, stockText } from './utils'
-import { loadPreferences } from './hooks/useRecipes'
+import type { PantryItem } from '../types'
+import { dateOffset } from './dates'
+import { stockText } from './format'
+import { restockCandidates, sameFoodInPantry } from './ingredients'
+import { loadPreferences } from '../hooks/useRecipes'
 
 const item = (name: string, days: number, extra: Partial<PantryItem> = {}): PantryItem => ({
   id: `${name}-${days}`, name, quantity: 1, unit: '個', expiryDate: dateOffset(days), category: 'その他', emoji: '🛒', note: '', createdAt: '', ...extra,

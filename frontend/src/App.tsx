@@ -1,10 +1,9 @@
 import { useState } from 'react'
-import { API_BASE, AUTH_EMAIL_KEY, AUTH_TOKEN_KEY } from './data'
-import { apiFetch } from './api'
+import { API_BASE, AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, PREFS_KEY } from './lib/config'
+import { apiFetch } from './lib/api'
 import { LoginScreen } from './components/LoginScreen'
 import { Kitchen } from './Kitchen'
-import { PREFS_KEY } from './hooks/useRecipes'
-import { clearLocalData } from './utils'
+import { clearLocalData } from './lib/storage'
 
 function App() {
   const [authToken, setAuthToken] = useState(() => localStorage.getItem(AUTH_TOKEN_KEY) || '')

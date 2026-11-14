@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import type { ShoppingItem } from '../types'
-import { ApiError } from '../api'
+import { ApiError } from '../lib/api'
 
 type Call = <T>(path: string, options?: { method?: string; body?: unknown }) => Promise<T>
 type Show = (message: string, tone?: 'success' | 'error') => void
