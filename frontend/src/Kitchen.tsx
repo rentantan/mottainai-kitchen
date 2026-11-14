@@ -3,7 +3,7 @@ import { AlertTriangle, CircleCheck, RefreshCw } from 'lucide-react'
 import type { PantryItem, PantryState, Recipe, SavedRecipe, ShoppingItem, WasteSummary } from './types'
 import { FREEZER_DAYS, dateOffset, demoItems } from './data'
 import { ApiError, apiFetch } from './api'
-import { daysUntil, findSaved, formatQuantity, loadCachedPantry, saveCachedPantry, toSavedPayload } from './utils'
+import { daysUntil, findSaved, formatQuantity, loadCachedPantry, pantryMatchesFor, saveCachedPantry, stockText, toSavedPayload } from './utils'
 import { useToast } from './hooks/useToast'
 import { useShopping } from './hooks/useShopping'
 import { useRecipes } from './hooks/useRecipes'
@@ -41,6 +41,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
   const [waste, setWaste] = useState<WasteSummary>(EMPTY_WASTE)
   const [staples, setStaples] = useState<string[]>([])
   const [savedRecipes, setSavedRecipes] = useState<SavedRecipe[]>([])
+  const [restock, setRestock] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('pantry')
   const [filter, setFilter] = useState<PantryFilter>('all')
   const [editing, setEditing] = useState<PantryItem | null>(null)
@@ -112,8 +113,16 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
   }, [today])
 
   useEffect(() => { void loadAll() }, []) // eslint-disable-line react-hooks/exhaustive-deps -- once per mount (Kitchen remounts per session)
+  // Recently used-up foods for "最近使い切った" on the shopping list: fetched each time the tab is opened,
+  // so food used up a moment ago is offered. A failure only hides the suggestions.
+  useEffect(() => {
+    if (activeTab !== 'shopping' || status !== 'ready') return
+    let current = true
+    call<{ names: string[] }>('/api/shopping/restock').then((result) => { if (current) setRestock(result.names) }).catch(() => {})
+    return () => { current = false }
+  }, [activeTab, status]) // eslint-disable-line react-hooks/exhaustive-deps -- call is recreated every render
   useEffect(() => { if (status === 'ready') saveCachedPantry(email, pantry) }, [pantry, status, email])
-  const suggestions = useRecipes({ call, status, pantry, staples })
+  const suggestions = useRecipes({ call, email, status, pantry, staples })
 
   /** Run a mutation with shared busy/error handling. */
   async function mutate(action: () => Promise<MutationResult>) {
@@ -264,7 +273,10 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
     void mutate(async () => {
       const result = await call<{ items: ShoppingItem[]; added: number }>('/api/shopping', { method: 'POST', body: { names } })
       shoppingList.replace(result.items)
-      return result.added ? `買い物リストに${result.added}品を追加しました` : 'すでに買い物リストに入っています'
+      if (!result.added) return 'すでに買い物リストに入っています'
+      // Typed by hand while something is still in the fridge: say so, to avoid buying it twice.
+      const stock = names.length === 1 ? pantryMatchesFor(names[0], pantry)[0] : undefined
+      return stock ? `買い物リストに追加しました（冷蔵庫に${stockText(stock)}があります）` : `買い物リストに${result.added}品を追加しました`
     })
   }
 
@@ -327,7 +339,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
         {activeTab === 'recipes' && <RecipesView recipes={suggestions.recipes} loading={suggestions.loading || status === 'loading'} stale={suggestions.stale} source={suggestions.source} message={suggestions.message}
           budgetYen={suggestions.budgetYen} onBudget={suggestions.setBudgetYen} maxMinutes={suggestions.maxMinutes} onMaxMinutes={suggestions.setMaxMinutes} equipment={suggestions.equipment} onEquipment={suggestions.setEquipment}
           staples={staples} onSaveStaples={saveStaples} savedRecipes={savedRecipes} pantry={pantry} busy={busy} onRefresh={() => void suggestions.refresh(!suggestions.stale)} onSelect={setSelectedRecipe} onShowPantry={() => setActiveTab('pantry')} />}
-        {activeTab === 'shopping' && <ShoppingView items={shopping} busy={busy}
+        {activeTab === 'shopping' && <ShoppingView items={shopping} pantry={pantry} restock={restock} busy={busy}
           onAdd={(name) => addToShopping([name])}
           onToggle={shoppingList.toggle} onDelete={shoppingList.remove} onClearChecked={shoppingList.clearChecked}
           onMoveToPantry={(item) => setFormName(item.name)} onStockAll={() => setShowStock(true)} />}
@@ -335,7 +347,7 @@ export function Kitchen({ token, email, onLogout, onSessionExpired, onAccountDel
       </main>
 
       {toast && <div className={`toast ${toast.tone === 'error' ? 'toast-error' : ''}`} role={toast.tone === 'error' ? 'alert' : 'status'}>{toast.tone === 'error' ? <AlertTriangle size={17} /> : <CircleCheck size={17} />}{toast.message}{toast.action && <button type="button" className="toast-action" onClick={toast.action.onClick}>{toast.action.label}</button>}</div>}
-      {showForm && <IngredientModal item={editing} initialName={formName ?? ''} onClose={closeForm} onSave={handleSave} />}
+      {showForm && <IngredientModal item={editing} pantry={pantry} initialName={formName ?? ''} onClose={closeForm} onSave={handleSave} />}
       {deleting && <DeleteModal item={deleting} onClose={() => setDeleting(null)} onDelete={(reason) => handleDelete(deleting, reason)} />}
       {consuming && <ConsumeModal item={consuming} onClose={() => setConsuming(null)} onConsume={(amount) => handleConsume(consuming, amount)} />}
       {showStock && <StockModal items={shopping} busy={busy} onClose={() => setShowStock(false)} onSave={stockFromShopping} />}

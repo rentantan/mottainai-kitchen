@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -34,6 +34,29 @@ def _read_shopping(connection, user_id: str) -> list[dict[str, Any]]:
 def list_shopping(user: CurrentUser) -> dict[str, Any]:
     with db_connection() as connection:
         return {"items": _read_shopping(connection, user["id"])}
+
+
+RESTOCK_DAYS = 30
+MAX_RESTOCK_SUGGESTIONS = 8
+
+
+@router.get("/shopping/restock")
+def restock_suggestions(user: CurrentUser) -> dict[str, list[str]]:
+    """Foods used up recently ("使い切った"), newest first, one name per food (卵 / たまご count
+    once). The client hides the ones already in the fridge or on the list."""
+    since = (datetime.now(ZoneInfo("Asia/Tokyo")) - timedelta(days=RESTOCK_DAYS)).isoformat()
+    with db_connection() as connection:
+        rows = connection.execute(
+            "SELECT name FROM consume_log WHERE user_id = ? AND used_up = 1 AND consumed_at >= ? ORDER BY consumed_at DESC LIMIT 200",
+            (user["id"], since),
+        ).fetchall()
+    names: list[str] = []
+    for row in rows:
+        if not any(matches_name(row["name"], other) for other in names):
+            names.append(row["name"])
+        if len(names) >= MAX_RESTOCK_SUGGESTIONS:
+            break
+    return {"names": names}
 
 
 @router.post("/shopping")

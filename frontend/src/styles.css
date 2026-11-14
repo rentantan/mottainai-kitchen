@@ -389,3 +389,12 @@ body{background:radial-gradient(1200px 500px at 85% -10%,#eef5e8 0%,transparent 
 .freezer-suggest button{margin-left:auto;border:1px solid #b9d2b6;background:#fff;color:#356c4c;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;white-space:nowrap}
 .suggest-buttons{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
 .suggest-buttons button{margin-left:0}
+/* Shopping: what is still in the fridge, and recently used-up foods to buy again */
+.shopping-stock{display:flex;align-items:center;gap:4px;margin-top:3px;font-size:12px;color:#8a6a2f;text-decoration:none}.shopping-stock svg{flex-shrink:0}
+.restock-suggestions{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin:-4px 0 14px}
+.restock-label{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:#5f6b60;margin-right:2px}
+.restock-suggestions button{display:inline-flex;align-items:center;gap:3px;border:1px solid #e1e7de;background:#fff;color:#5f6b60;border-radius:999px;padding:4px 9px;font-size:12px}.restock-suggestions button:hover{border-color:#a9c7a6;color:#2f5e3d}
+.duplicate-hint{background:#fff7e9;color:#82602a}.duplicate-hint svg{color:#a8792f}
+.discard-button{flex:none;display:flex;align-items:center;gap:4px;border:1px solid #f0dcd6;background:#fdf3f0;color:#ae5e54;border-radius:7px;padding:7px 9px;font-size:13px;font-weight:700;transition:background .15s}
+.discard-button:hover{background:#f9e6e1}
+@media(max-width:580px){.discard-button{font-size:12px;padding:6px 7px}}

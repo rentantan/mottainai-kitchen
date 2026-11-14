@@ -29,6 +29,12 @@ export function loadCachedPantry(email: string): PantryItem[] | null {
     return Array.isArray(parsed) ? parsed as PantryItem[] : null
   } catch { return null }
 }
+/** Forget everything this device kept for an account (after the account is deleted). */
+export function clearLocalData(email: string, keys: string[]) {
+  for (const key of [STORAGE_KEY, ...keys]) {
+    try { localStorage.removeItem(`${key}:${email}`) } catch { /* storage disabled */ }
+  }
+}
 export function saveCachedPantry(email: string, items: PantryItem[]) {
   try { localStorage.setItem(`${STORAGE_KEY}:${email}`, JSON.stringify(items)) } catch { /* storage full or disabled */ }
 }
@@ -129,6 +135,21 @@ export function pantryMatchesFor(ingredient: string, pantry: PantryItem[]) {
   return pantry
     .filter((item) => daysUntil(item.expiryDate) >= 0 && ingredientMatches(ingredient, item))
     .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate))
+}
+/** Pantry items of the same food, expired ones included (for "you already have this" hints), nearest expiry first. */
+export function sameFoodInPantry(name: string, pantry: PantryItem[]) {
+  if (!name.trim()) return []
+  return pantry.filter((item) => nameMatches(name, item.name)).sort((a, b) => a.expiryDate.localeCompare(b.expiryDate))
+}
+/** "卵 残り6個・あと3日" (with ❄️ for frozen food), for stock hints. */
+export function stockText(item: PantryItem) {
+  return `${item.frozen ? '❄️' : ''}${item.name} 残り${formatQuantity(item.quantity)}${item.unit}・${expiryText(daysUntil(item.expiryDate))}`
+}
+/**
+ * Recently used-up foods worth buying again: not in the fridge (unexpired) and not already on the open shopping list.
+ */
+export function restockCandidates(names: string[], pantry: PantryItem[], openShopping: string[]) {
+  return names.filter((name) => pantryMatchesFor(name, pantry).length === 0 && !openShopping.some((other) => nameMatches(name, other)))
 }
 
 /**

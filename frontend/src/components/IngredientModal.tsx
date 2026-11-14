@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Check, Sparkles, X } from 'lucide-react'
+import { Check, Refrigerator, Sparkles, X } from 'lucide-react'
 import type { Category, PantryItem } from '../types'
 import { FREEZER_DAYS, categoryEmoji, categoryOptions, dateOffset } from '../data'
 import { findFoodPreset } from '../foodPresets'
 import type { FoodPreset } from '../foodPresets'
 import { useModal } from '../hooks/useModal'
-import { daysUntil } from '../utils'
+import { daysUntil, sameFoodInPantry, stockText } from '../utils'
 
 const UNIT_SUGGESTIONS = ['個', '本', '枚', '袋', 'パック', '丁', '玉', '束', '缶', '切れ', 'g', 'kg', 'ml', 'L']
 const EXPIRY_SHORTCUTS: { label: string; days: number }[] = [
@@ -15,7 +15,7 @@ const EXPIRY_SHORTCUTS: { label: string; days: number }[] = [
 
 type Field = 'unit' | 'expiryDate' | 'category'
 
-export function IngredientModal({ item, initialName = '', onClose, onSave }: { item: PantryItem | null; initialName?: string; onClose: () => void; onSave: (item: Omit<PantryItem, 'id' | 'createdAt'>) => void }) {
+export function IngredientModal({ item, pantry = [], initialName = '', onClose, onSave }: { item: PantryItem | null; pantry?: PantryItem[]; initialName?: string; onClose: () => void; onSave: (item: Omit<PantryItem, 'id' | 'createdAt'>) => void }) {
   // For a new item, start from the typical values for the given name (e.g. coming from the shopping list).
   const [preset, setPreset] = useState<FoodPreset | null>(() => item ? null : findFoodPreset(initialName))
   const [name, setName] = useState(item?.name ?? initialName)
@@ -65,6 +65,10 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
     touch('expiryDate')
   }
 
+  // Adding food that is already in the fridge: point at the old one so it is used first (or recorded if thrown away).
+  const already = item ? [] : sameFoodInPantry(name, pantry)
+  const oldest = already[0]
+
   const freezerDate = dateOffset(FREEZER_DAYS)
   // Only for food frozen just now in this form: "a month from today" makes sense then, not for older frozen food.
   const offerFreezerDate = frozen && !item?.frozen && expiryDate !== '' && expiryDate !== freezerDate && daysUntil(expiryDate) < FREEZER_DAYS
@@ -83,6 +87,7 @@ export function IngredientModal({ item, initialName = '', onClose, onSave }: { i
     <div className="modal-header"><div><div className="modal-eyebrow">YOUR PANTRY</div><h2 id="ingredient-modal-title">{item ? '食材を編集' : '食材を追加'}</h2><p>食材の情報を入力してください。</p></div><button className="modal-close" onClick={onClose} aria-label="閉じる"><X size={19} /></button></div>
     <form onSubmit={submit} className="ingredient-form">
       <label className="form-label">食材名 <span>必須</span><input autoFocus value={name} maxLength={80} onChange={(e) => changeName(e.target.value)} placeholder="例：キャベツ" /></label>
+      {oldest && <p className="preset-hint duplicate-hint" role="status"><Refrigerator size={13} /><span>冷蔵庫にすでに {stockText(oldest)}{already.length > 1 && ` ほか${already.length - 1}件`} があります。{daysUntil(oldest.expiryDate) < 0 ? '捨てた場合は一覧の 🗑 から「捨てた」を記録しておこう。' : '古いほうから先に使おう。'}</span></p>}
       {preset && <p className="preset-hint" role="status"><Sparkles size={13} />{emoji} よくある単位・カテゴリ・期限の目安を入れました。パッケージの表示に合わせて直してください。</p>}
       <div className="form-two-col">
         <label className="form-label">残量<input type="number" inputMode="decimal" min="0.01" step="any" max={100000} value={quantity} onChange={(e) => setQuantity(e.target.value)} /></label>

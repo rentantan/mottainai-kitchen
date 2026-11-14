@@ -3,6 +3,8 @@ import { API_BASE, AUTH_EMAIL_KEY, AUTH_TOKEN_KEY } from './data'
 import { apiFetch } from './api'
 import { LoginScreen } from './components/LoginScreen'
 import { Kitchen } from './Kitchen'
+import { PREFS_KEY } from './hooks/useRecipes'
+import { clearLocalData } from './utils'
 
 function App() {
   const [authToken, setAuthToken] = useState(() => localStorage.getItem(AUTH_TOKEN_KEY) || '')
@@ -33,7 +35,7 @@ function App() {
   if (!authToken) return <LoginScreen apiBase={API_BASE} notice={loginNotice} onAuthenticated={handleAuthenticated} />
   // key={authToken}: switching accounts remounts Kitchen, so no state from the previous user survives.
   return <Kitchen key={authToken} token={authToken} email={authEmail} onLogout={handleLogout} onSessionExpired={() => clearSession('ログインの有効期限が切れました。もう一度ログインしてください。')}
-    onAccountDeleted={() => clearSession('アカウントとすべてのデータを削除しました。ご利用ありがとうございました。')} />
+    onAccountDeleted={() => { clearLocalData(authEmail, [PREFS_KEY]); clearSession('アカウントとすべてのデータを削除しました。ご利用ありがとうございました。') }} />
 }
 
 export default App

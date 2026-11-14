@@ -9,6 +9,25 @@ export type Budget = 300 | 500 | 700
 export type Minutes = 10 | 20 | 30
 type Call = <T>(path: string, options?: { method?: string; body?: unknown; timeoutMs?: number }) => Promise<T>
 type SuggestResponse = { recipes?: Recipe[]; source?: 'gemini' | 'local'; message?: string }
+type Preferences = { budgetYen: Budget; maxMinutes: Minutes; equipment: Equipment }
+
+export const PREFS_KEY = 'mottainai-kitchen-recipe-prefs-v1'
+const DEFAULT_PREFS: Preferences = { budgetYen: 500, maxMinutes: 20, equipment: 'any' }
+
+/** The conditions picked last time on this device (per account), so a student without a stove picks "レンジだけ" once. */
+export function loadPreferences(email: string): Preferences {
+  try {
+    const saved = JSON.parse(localStorage.getItem(`${PREFS_KEY}:${email}`) ?? 'null') as Partial<Preferences> | null
+    return {
+      budgetYen: ([300, 500, 700] as const).find((value) => value === saved?.budgetYen) ?? DEFAULT_PREFS.budgetYen,
+      maxMinutes: ([10, 20, 30] as const).find((value) => value === saved?.maxMinutes) ?? DEFAULT_PREFS.maxMinutes,
+      equipment: saved?.equipment === 'microwave' ? 'microwave' : 'any',
+    }
+  } catch { return DEFAULT_PREFS }
+}
+function savePreferences(email: string, prefs: Preferences) {
+  try { localStorage.setItem(`${PREFS_KEY}:${email}`, JSON.stringify(prefs)) } catch { /* storage full or disabled */ }
+}
 
 /**
  * Recipe suggestions: conditions (budget / time / equipment), the current results, and whether
@@ -17,15 +36,17 @@ type SuggestResponse = { recipes?: Recipe[]; source?: 'gemini' | 'local'; messag
  * Suggests once when the data has loaded. After that only the button asks again: calling
  * Gemini on every pantry or settings change would burn the shared free quota.
  */
-export function useRecipes({ call, status, pantry, staples }: { call: Call; status: DataStatus; pantry: PantryItem[]; staples: string[] }) {
+export function useRecipes({ call, email, status, pantry, staples }: { call: Call; email: string; status: DataStatus; pantry: PantryItem[]; staples: string[] }) {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [loading, setLoading] = useState(false)
   const [source, setSource] = useState<'gemini' | 'local'>('local')
   const [message, setMessage] = useState('')
   const [requestedKey, setRequestedKey] = useState('')
-  const [budgetYen, setBudgetYen] = useState<Budget>(500)
-  const [maxMinutes, setMaxMinutes] = useState<Minutes>(20)
-  const [equipment, setEquipment] = useState<Equipment>('any')
+  const [initialPrefs] = useState(() => loadPreferences(email))
+  const [budgetYen, setBudgetYen] = useState<Budget>(initialPrefs.budgetYen)
+  const [maxMinutes, setMaxMinutes] = useState<Minutes>(initialPrefs.maxMinutes)
+  const [equipment, setEquipment] = useState<Equipment>(initialPrefs.equipment)
+  useEffect(() => savePreferences(email, { budgetYen, maxMinutes, equipment }), [email, budgetYen, maxMinutes, equipment])
   const initialRequested = useRef(false)
 
   const key = useMemo(() => JSON.stringify({
